@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^python - <<'PY'\nfrom pathlib import Path\np=Path\\('src/main\\.jsx'\\)\ns=p\\.read_text\\(\\)\ns=s\\.replace\\('title=\"Plan view\" description=\"See when each maintenance plan was last completed, when it is due next, and how critical it is\\.\"', 'title=\"Critical view\" description=\"See every maintenance activity ordered from stable to critical\\.\"'\\)\np\\.write_text\\(s\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
