@@ -125,6 +125,16 @@
 .team-note-inline-edit textarea { width: 100%; min-height: 48px; padding: 6px 8px; border: 1px solid #d9823b; border-radius: 4px; font: inherit; font-size: 11.5px; color: #2e353c; outline: none; }
 .team-note-edit-buttons { display: flex; gap: 6px; justify-content: flex-end; }
 .note-small-btn { height: 26px; padding: 0 9px; font-size: 10px; }
+
+.plan-state.state-critical { color: #be4b40; font-weight: 700; }
+.plan-state.state-critical i { background: #be4b40; }
+.plan-state.state-overdue { color: #d9823b; font-weight: 700; }
+.plan-state.state-overdue i { background: #d9823b; }
+.plan-state.state-due-soon { color: #df9d55; font-weight: 700; }
+.plan-state.state-due-soon i { background: #df9d55; }
+.plan-state.state-on-track { color: #2e7d4a; font-weight: 700; }
+.plan-state.state-on-track i { background: #2e7d4a; }
+.overdue-text { color: #be4b40 !important; font-weight: 700 !important; }
 .spin { animation: report-spin .8s linear infinite; }
 @keyframes report-spin { to { transform: rotate(360deg); } }
 @media print {

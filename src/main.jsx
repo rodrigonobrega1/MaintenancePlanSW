@@ -185,14 +185,10 @@ function exportPlanDashboardPdf({ plans, line, notes = [] }) {
   const cardWidth = 87
   const cardHeight = 38
   const cardGap = 6
-  const getSeverity = (plan) => {
-    if (plan.criticality === 'Critical' || plan.daysOverdue > plan.periodDays) return 'Critical'
-    if (plan.daysOverdue > 0 || plan.criticality === 'Due soon') return 'Medium'
-    return 'Low'
-  }
   const statusColor = (plan) => {
-    const severity = getSeverity(plan)
-    return severity === 'Critical' ? [201, 104, 95] : severity === 'Medium' ? [223, 157, 85] : [103, 168, 118]
+    if (plan.daysOverdue > 30 || plan.criticality === 'Critical') return [201, 104, 95]
+    if (plan.daysOverdue > 0 || plan.criticality === 'Due soon') return [223, 157, 85]
+    return [103, 168, 118]
   }
   const header = (continued = false) => {
     pdf.setTextColor(37, 40, 45)
@@ -211,12 +207,15 @@ function exportPlanDashboardPdf({ plans, line, notes = [] }) {
     const x = 12 + column * (cardWidth + cardGap)
     const y = 31 + row * (cardHeight + 3)
     const color = statusColor(plan)
+    const isOverdue = plan.daysOverdue > 0
     pdf.setFillColor(252, 252, 251)
     pdf.setDrawColor(...color)
     pdf.setLineWidth(1)
     pdf.roundedRect(x, y, cardWidth, cardHeight, 2, 2, 'FD')
     pdf.setTextColor(90, 98, 105); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text(plan.frequency, x + 6, y + 8)
-    pdf.setTextColor(...color); pdf.setFontSize(8); pdf.text(getSeverity(plan), x + 57, y + 8)
+    pdf.setTextColor(...color); pdf.setFontSize(8);
+    const badgeText = isOverdue ? `${plan.daysOverdue}d overdue` : plan.criticality === 'Due soon' ? 'Due soon' : 'On track'
+    pdf.text(badgeText, x + (cardWidth - 6 - pdf.getTextWidth(badgeText)), y + 8)
     pdf.setTextColor(47, 55, 61); pdf.setFontSize(10); pdf.text(plan.activity.slice(0, 31), x + 6, y + 17)
     pdf.setTextColor(125, 133, 140); pdf.setFontSize(8); pdf.text(`${plan.machine} · ${plan.planCode}`.slice(0, 38), x + 6, y + 24)
     pdf.text(`Last: ${plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed'}`, x + 6, y + 30)
@@ -230,15 +229,24 @@ function exportPlanDashboardPdf({ plans, line, notes = [] }) {
   pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text('Top 10 activities, ordered by delay and severity', 12, 32)
   const listStart = 38
   pdf.setFillColor(239, 241, 243); pdf.rect(12, listStart, 273, 9, 'F')
-  pdf.setTextColor(100, 108, 115); pdf.setFontSize(8); pdf.text('Rank', 16, listStart + 6); pdf.text('Activity', 35, listStart + 6); pdf.text('Machine', 150, listStart + 6); pdf.text('Due date', 210, listStart + 6); pdf.text('Severity', 257, listStart + 6)
+  pdf.setTextColor(100, 108, 115); pdf.setFontSize(8); pdf.text('Rank', 16, listStart + 6); pdf.text('Activity', 35, listStart + 6); pdf.text('Machine', 145, listStart + 6); pdf.text('Due date / Overdue', 205, listStart + 6); pdf.text('Severity', 260, listStart + 6)
   ordered.slice(0, 10).forEach((plan, index) => {
     const rowY = listStart + 16 + index * 10
+    const color = statusColor(plan)
+    const isOverdue = plan.daysOverdue > 0
     pdf.setDrawColor(232, 234, 236); pdf.line(12, rowY + 3.5, 285, rowY + 3.5)
     pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.text(String(index + 1).padStart(2, '0'), 16, rowY)
-    pdf.setTextColor(54, 62, 69); pdf.text(plan.activity.slice(0, 58), 35, rowY)
-    pdf.setTextColor(112, 121, 128); pdf.text(plan.machine.slice(0, 30), 150, rowY)
-    pdf.text(plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned', 210, rowY)
-    pdf.setTextColor(...statusColor(plan)); pdf.text(getSeverity(plan), 257, rowY)
+    pdf.setTextColor(54, 62, 69); pdf.text(plan.activity.slice(0, 56), 35, rowY)
+    pdf.setTextColor(112, 121, 128); pdf.text(plan.machine.slice(0, 28), 145, rowY)
+    if (isOverdue) {
+      pdf.setTextColor(...color); pdf.setFont('helvetica', 'bold')
+      pdf.text(`${plan.daysOverdue} days overdue`, 205, rowY)
+    } else {
+      pdf.setTextColor(112, 121, 128); pdf.setFont('helvetica', 'normal')
+      pdf.text(plan.nextDue ? `Due ${formatPrintDate(plan.nextDue)}` : 'To be planned', 205, rowY)
+    }
+    pdf.setTextColor(...color); pdf.setFont('helvetica', 'bold')
+    pdf.text(isOverdue ? (plan.daysOverdue > 30 ? 'Critical' : 'Overdue') : (plan.criticality === 'Due soon' ? 'Due soon' : 'On track'), 260, rowY)
   })
 
   if (notes && notes.length > 0) {
@@ -669,34 +677,103 @@ function normalizeWorkbook(buffer) {
 function normalizeTimelineWorkbook(buffer) {
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: null })
+  const today = new Date()
   const groups = new Map()
+
   rows.forEach((row) => {
-    const description = String(row['Maintenance item description'] || '').trim()
-    if (!description) return
-    const separator = description.indexOf(' - ')
-    const machine = normalizeMachineName(separator > 0 ? description.slice(0, separator) : 'General / site-wide')
-    const activity = separator > 0 ? description.slice(separator + 3).trim() : description
-    const key = `${row['Maintenance Plan'] || 'Unassigned'}|${description}`
-    if (!groups.has(key)) groups.set(key, { machine, activity, planCode: row['Maintenance Plan'] || 'Unassigned', dates: [], completions: [] })
+    const rawDescription = String(row['Maintenance item description'] || '').trim()
+    if (!rawDescription) return
+    const separator = rawDescription.indexOf(' - ')
+    const machine = normalizeMachineName(separator > 0 ? rawDescription.slice(0, separator) : 'General / site-wide')
+    const activity = separator > 0 ? rawDescription.slice(separator + 3).trim() : rawDescription
+    const planCode = String(row['Maintenance Plan'] || 'Unassigned').trim()
+    const key = `${planCode}|${rawDescription}`
+
+    if (!groups.has(key)) {
+      groups.set(key, { machine, activity, rawDescription, planCode, calls: [] })
+    }
     const group = groups.get(key)
     const scheduledDate = toDate(row['Scheduled start date'])
     const completionDate = toDate(row['Completion date'])
-    if (scheduledDate) group.dates.push(scheduledDate)
-    if (completionDate) group.completions.push(completionDate)
+    const order = String(row['Order'] || '').trim()
+    const callNo = row['MntPlan Call No.']
+    group.calls.push({ scheduledDate, completionDate, order, callNo })
   })
+
   return [...groups.values()].map((group, index) => {
-    const dates = group.dates.sort((a, b) => a - b)
-    const completions = group.completions.sort((a, b) => b - a)
-    const frequency = inferFrequency(group.activity, dates)
-    const lastCompleted = completions[0] || null
-    const lastScheduled = dates.at(-1) || null
-    const nextDue = getNextDueDate(lastScheduled, frequency)
-    const daysOverdue = nextDue ? Math.max(0, Math.floor((new Date() - nextDue) / 86400000)) : 0
+    const scheduledDates = group.calls.map((c) => c.scheduledDate).filter(Boolean)
+    const frequency = inferFrequency(group.rawDescription, scheduledDates)
     const periodDays = getPeriodDays(frequency)
-    const delayDays = lastCompleted && lastScheduled ? Math.floor((lastCompleted - lastScheduled) / 86400000) : lastScheduled ? Math.floor((new Date() - lastScheduled) / 86400000) : 0
-    const riskStage = getRiskStage(delayDays, periodDays, lastCompleted, lastScheduled)
-    return { id: `timeline-${index}`, machine: group.machine, activity: group.activity, planCode: group.planCode, frequency, lastCompleted, lastScheduled, nextDue, daysOverdue, delayDays, periodDays, totalOrders: group.dates.length, completedOrders: completions.length, criticality: getCriticality(daysOverdue), riskStage }
-  }).sort((a, b) => b.daysOverdue - a.daysOverdue || a.machine.localeCompare(b.machine) || a.activity.localeCompare(b.activity))
+
+    const completedCalls = group.calls
+      .filter((c) => c.completionDate)
+      .sort((a, b) => b.completionDate - a.completionDate)
+    const lastCompleted = completedCalls[0]?.completionDate || null
+
+    const uncompletedCalls = group.calls
+      .filter((c) => !c.completionDate && c.scheduledDate)
+      .sort((a, b) => a.scheduledDate - b.scheduledDate)
+
+    const totalOrders = group.calls.length
+    const completedOrders = completedCalls.length
+    const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
+
+    let nextDue = null
+    let daysOverdue = 0
+    let criticality = 'On track'
+
+    if (lastCompleted) {
+      const nextDueFromCompletion = addPeriod(lastCompleted, frequency)
+      const futureScheduledCall = uncompletedCalls.find((c) => c.scheduledDate > lastCompleted)
+      nextDue = futureScheduledCall ? futureScheduledCall.scheduledDate : nextDueFromCompletion
+
+      if (nextDue < today) {
+        daysOverdue = Math.max(0, Math.floor((today - nextDue) / 86400000))
+        criticality = daysOverdue > 30 ? 'Critical' : 'Overdue'
+      } else {
+        daysOverdue = 0
+        const daysUntilDue = Math.floor((nextDue - today) / 86400000)
+        criticality = daysUntilDue <= 14 ? 'Due soon' : 'On track'
+      }
+    } else {
+      const earliestScheduled = uncompletedCalls[0]
+      if (earliestScheduled) {
+        nextDue = earliestScheduled.scheduledDate
+        if (nextDue < today) {
+          daysOverdue = Math.max(0, Math.floor((today - nextDue) / 86400000))
+          criticality = daysOverdue > 30 ? 'Critical' : 'Overdue'
+        } else {
+          daysOverdue = 0
+          const daysUntilDue = Math.floor((nextDue - today) / 86400000)
+          criticality = daysUntilDue <= 14 ? 'Due soon' : 'On track'
+        }
+      } else {
+        criticality = 'On track'
+      }
+    }
+
+    const delayDays = daysOverdue
+    const riskStage = criticality === 'Critical' ? 'Critical' : daysOverdue > 0 ? 'High risk' : criticality === 'Due soon' ? 'Medium risk' : 'Low risk'
+
+    return {
+      id: `timeline-${index}`,
+      machine: group.machine,
+      activity: group.activity,
+      planCode: group.planCode,
+      frequency,
+      lastCompleted,
+      lastScheduled: uncompletedCalls[0]?.scheduledDate || group.calls.map((c) => c.scheduledDate).filter(Boolean).sort((a, b) => b - a)[0] || null,
+      nextDue,
+      daysOverdue,
+      delayDays,
+      periodDays,
+      totalOrders,
+      completedOrders,
+      completionRate,
+      criticality,
+      riskStage,
+    }
+  }).sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
 }
 
 function normalizeLogbookRecords(buffer) {
@@ -731,16 +808,22 @@ function normalizeLogbookRecords(buffer) {
   })
 }
 
-function getNextDueDate(date, frequency) {
+function addPeriod(date, frequency) {
   if (!date) return null
   const next = new Date(date)
-  const days = { Daily: 1, Weekly: 7, Monthly: 30, Quarterly: 91, Biannual: 182, Annual: 365 }[frequency] || 365
-  if (frequency === 'Monthly') next.setMonth(next.getMonth() + 1)
+  if (frequency === 'Daily') next.setDate(next.getDate() + 1)
+  else if (frequency === 'Weekly') next.setDate(next.getDate() + 7)
+  else if (frequency === '6-Weekly') next.setDate(next.getDate() + 42)
+  else if (frequency === 'Monthly') next.setMonth(next.getMonth() + 1)
   else if (frequency === 'Quarterly') next.setMonth(next.getMonth() + 3)
   else if (frequency === 'Biannual') next.setMonth(next.getMonth() + 6)
   else if (frequency === 'Annual') next.setFullYear(next.getFullYear() + 1)
-  else next.setDate(next.getDate() + days)
+  else next.setDate(next.getDate() + 30)
   return next
+}
+
+function getNextDueDate(date, frequency) {
+  return addPeriod(date, frequency)
 }
 
 function getCriticality(daysOverdue) {
@@ -751,15 +834,14 @@ function getCriticality(daysOverdue) {
 }
 
 function getPeriodDays(frequency) {
-  return { Daily: 1, Weekly: 7, Monthly: 30, Quarterly: 91, Biannual: 182, Annual: 365 }[frequency] || 365
+  const map = { Daily: 1, Weekly: 7, '6-Weekly': 42, Monthly: 30, Quarterly: 91, Biannual: 182, Annual: 365 }
+  return map[frequency] || 30
 }
 
 function getRiskStage(delayDays, periodDays, lastCompleted, lastScheduled) {
-  if (!lastScheduled) return 'Low risk'
-  if (!lastCompleted && delayDays > periodDays * 2) return 'Critical'
-  if (delayDays > periodDays * 2) return 'Critical'
-  if (delayDays > periodDays) return 'High risk'
-  if (delayDays > 0 || !lastCompleted) return 'Medium risk'
+  if (!lastScheduled && !lastCompleted) return 'Low risk'
+  if (delayDays > periodDays * 2 || delayDays > 30) return 'Critical'
+  if (delayDays > 0) return 'High risk'
   return 'Low risk'
 }
 
@@ -769,14 +851,15 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function inferFrequency(description, dates) {
-  const text = description.toLowerCase()
+function inferFrequency(description, dates = []) {
+  const text = (description || '').toLowerCase()
   if (text.includes('daily') || text.includes('day')) return 'Daily'
-  if (text.includes('weekly') || text.includes('week')) return 'Weekly'
+  if (text.includes('6 weekly') || text.includes('6 week')) return '6-Weekly'
+  if (text.includes('weekly') || text.includes('week') || text.includes('ppm check') || text.includes('ppm of tyer')) return 'Weekly'
+  if (text.includes('6 monthly') || text.includes('6 month') || text.includes('biannual') || text.includes('6m')) return 'Biannual'
+  if (text.includes('3 monthly') || text.includes('3 month') || text.includes('quarter')) return 'Quarterly'
   if (text.includes('monthly') || text.includes('month')) return 'Monthly'
-  if (text.includes('quarter')) return 'Quarterly'
-  if (text.includes('6 monthly') || text.includes('6 month') || text.includes('biannual')) return 'Biannual'
-  if (text.includes('annual') || text.includes('annually') || text.includes('12m') || text.includes('year')) return 'Annual'
+  if (text.includes('annual') || text.includes('annually') || text.includes('12m') || text.includes('12 month') || text.includes('year')) return 'Annual'
   if (dates.length > 1) {
     const intervals = dates.slice(1).map((date, index) => (date - dates[index]) / 86400000).filter((days) => days > 0)
     const average = intervals.length ? intervals.reduce((sum, days) => sum + days, 0) / intervals.length : 0
@@ -1387,8 +1470,44 @@ function Logbook({ records, loading, error, fileName, onUpload }) {
 }
 
 function MaintenancePlanCard({ plan }) {
-  const state = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : plan.criticality === 'Due soon' ? 'Due soon' : 'On track'
-  return <article className={`maintenance-plan-card card-${state.toLowerCase().replace(' ', '-')}`}><div className="plan-card-top"><span className="plan-frequency">{plan.frequency}</span><span className="plan-state"><i />{state}</span></div><h3>{plan.activity}</h3><div className="plan-card-tags"><span>{plan.machine}</span><span>{plan.planCode}</span></div><p>Preventive maintenance activity based on the current execution cycle.</p><div className="plan-card-meta"><span><small>Last execution</small><strong>{plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed'}</strong></span><span><small>Next planned</small><strong>{plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned'}</strong></span></div>{plan.daysOverdue > 0 && <div className="delay-badge"><AlertTriangle size={13} />{plan.daysOverdue} days overdue</div>}<div className="plan-card-progress"><i><em style={{ width: `${plan.completionRate}%` }} /></i></div></article>
+  const isOverdue = plan.daysOverdue > 0
+  const state = plan.criticality === 'Critical' ? 'Critical' : isOverdue ? 'Overdue' : plan.criticality === 'Due soon' ? 'Due soon' : 'On track'
+  return (
+    <article className={`maintenance-plan-card card-${state.toLowerCase().replace(' ', '-')}`}>
+      <div className="plan-card-top">
+        <span className="plan-frequency">{plan.frequency}</span>
+        <span className={`plan-state state-${state.toLowerCase().replace(' ', '-')}`}>
+          <i />
+          {isOverdue ? `${plan.daysOverdue}d overdue` : state}
+        </span>
+      </div>
+      <h3>{plan.activity}</h3>
+      <div className="plan-card-tags">
+        <span>{plan.machine}</span>
+        <span>{plan.planCode}</span>
+      </div>
+      <p>Preventive maintenance activity based on the current execution cycle.</p>
+      <div className="plan-card-meta">
+        <span>
+          <small>Last execution</small>
+          <strong>{plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed'}</strong>
+        </span>
+        <span>
+          <small>Next planned</small>
+          <strong>{plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned'}</strong>
+        </span>
+      </div>
+      {isOverdue && (
+        <div className="delay-badge">
+          <AlertTriangle size={13} />
+          {plan.daysOverdue} days overdue
+        </div>
+      )}
+      <div className="plan-card-progress">
+        <i><em style={{ width: `${plan.completionRate}%` }} /></i>
+      </div>
+    </article>
+  )
 }
 
 function PlanKpi({ icon: Icon, label, value, tone, detail }) {
@@ -1396,9 +1515,23 @@ function PlanKpi({ icon: Icon, label, value, tone, detail }) {
 }
 
 function PriorityActivity({ plan, rank }) {
-  const tone = plan.criticality === 'Critical' ? 'critical' : plan.daysOverdue > 0 ? 'overdue' : plan.criticality === 'Due soon' ? 'soon' : 'planned'
+  const isOverdue = plan.daysOverdue > 0
+  const tone = plan.criticality === 'Critical' ? 'critical' : isOverdue ? 'overdue' : plan.criticality === 'Due soon' ? 'soon' : 'planned'
   const Icon = tone === 'planned' ? CalendarDays : tone === 'soon' ? Clock3 : AlertTriangle
-  return <article className={`priority-activity priority-${tone}`}><span className="priority-rank">{String(rank).padStart(2, '0')}</span><div className="priority-icon"><Icon size={15} /></div><div className="priority-activity-content"><strong>{plan.activity}</strong><span>{plan.machine}</span><small>{plan.daysOverdue > 0 ? `${plan.daysOverdue} days overdue` : plan.nextDue ? `Due ${formatPrintDate(plan.nextDue)}` : 'Schedule pending'}</small></div><ArrowUpRight size={14} /></article>
+  return (
+    <article className={`priority-activity priority-${tone}`}>
+      <span className="priority-rank">{String(rank).padStart(2, '0')}</span>
+      <div className="priority-icon"><Icon size={15} /></div>
+      <div className="priority-activity-content">
+        <strong>{plan.activity}</strong>
+        <span>{plan.machine}</span>
+        <small className={isOverdue ? 'overdue-text' : ''}>
+          {isOverdue ? `${plan.daysOverdue} days overdue` : plan.nextDue ? `Due ${formatPrintDate(plan.nextDue)}` : 'Schedule pending'}
+        </small>
+      </div>
+      <ArrowUpRight size={14} />
+    </article>
+  )
 }
 
 function PlanView({ plans, loading, error, fileName, onUpload, onExport }) {
