@@ -7,6 +7,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowUpRight,
+  BookOpen,
   CalendarDays,
   Check,
   Copy,
@@ -15,8 +16,10 @@ import {
   ChevronRight,
   ClipboardCheck,
   Clock3,
+  Download,
   Filter,
   FileDown,
+  FileSpreadsheet,
   GanttChart,
   LayoutDashboard,
   ListFilter,
@@ -24,6 +27,8 @@ import {
   Menu,
   MoreHorizontal,
   Plus,
+  Printer,
+  RotateCcw,
   Search,
   SlidersHorizontal,
   Sparkles,
@@ -47,7 +52,8 @@ const initialTasks = [
 ]
 
 const navItems = [
-  { label: 'Maintenance Plan View', icon: GanttChart },
+  { label: 'Maintenance Plan View', icon: LayoutDashboard },
+  { label: 'Logbook', icon: ClipboardCheck },
 ]
 
 const dashboardReportStorageKey = 'fieldmark-dashboard-report'
@@ -234,6 +240,32 @@ function exportPlanDashboardPdf({ plans, line }) {
   pdf.save(`maintenance-plan-dashboard-${line.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pdf`)
 }
 
+function exportLogbookCsv(records, lineFilter) {
+  const headers = ['#', 'Line / Machine', 'Maintenance Plan', 'Item Code', 'Description', 'Call No.', 'Scheduled Start Date', 'Completion Date', 'Order', 'Status']
+  const rows = records.map((r, i) => [
+    i + 1,
+    `"${(r.line || '').replace(/"/g, '""')}"`,
+    `"${(r.planCode || '').replace(/"/g, '""')}"`,
+    `"${(r.itemCode || '').replace(/"/g, '""')}"`,
+    `"${(r.description || '').replace(/"/g, '""')}"`,
+    `"${(r.callNo || '').replace(/"/g, '""')}"`,
+    r.scheduledDate ? formatPrintDate(r.scheduledDate) : '',
+    r.completionDate ? formatPrintDate(r.completionDate) : '',
+    `"${(r.order || '').replace(/"/g, '""')}"`,
+    r.status,
+  ])
+  const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', `maintenance-logbook-${lineFilter.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 function exportWeeklyPdf({ weekStart, weekDays, weekPlans, weekNotes, sourcePlans }, pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }), save = true) {
   pdfHeader(pdf, 'Weekly maintenance plan', `Week of ${formatWeekRange(weekStart)}`)
   const findPlan = (key) => sourcePlans.find((plan) => plan.id === key.split('|')[1])
@@ -309,7 +341,7 @@ function exportMaintenancePlanReport({ weekStart, weekDays, plans, notes, filter
   }
   const header = (continued = false) => {
     pdf.setTextColor(34, 79, 122); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(18)
-    pdf.text('RELATÓRIO TÉCNICO - PLANO DE MANUTENÇÃO PREVENTIVA / PREDITIVA', 16, 16)
+    pdf.text('TECHNICAL REPORT - PREVENTIVE / PREDICTIVE MAINTENANCE PLAN', 16, 16)
     pdf.setDrawColor(34, 79, 122); pdf.setLineWidth(0.7); pdf.line(16, 21, 281, 21)
     pdf.setTextColor(86, 96, 106); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8)
     pdf.text(`Generated: ${generatedAt.toLocaleString('en-GB')} · Issuer: Maintenance Planning · Plan version: ${filters.fileName}`, 16, 28)
@@ -398,6 +430,7 @@ function App() {
   const [timelineLoading, setTimelineLoading] = useState(true)
   const [timelineError, setTimelineError] = useState('')
   const [timelineFileName, setTimelineFileName] = useState('MAINTENANCE PLANS WITH ORDERS.XLSX')
+  const [logbookRecords, setLogbookRecords] = useState([])
   const [criticalReportPlans, setCriticalReportPlans] = useState([])
   useEffect(() => {
     try {
@@ -417,6 +450,7 @@ function App() {
       .then((buffer) => {
         setSourcePlans(normalizeWorkbook(buffer))
         setTimelinePlans(normalizeTimelineWorkbook(buffer))
+        setLogbookRecords(normalizeLogbookRecords(buffer))
       })
       .catch(() => {
         setSourceError('The maintenance workbook could not be loaded.')
@@ -434,8 +468,12 @@ function App() {
     setTimelineLoading(true)
     setTimelineError('')
     try {
-      setTimelinePlans(normalizeTimelineWorkbook(await file.arrayBuffer()))
+      const buffer = await file.arrayBuffer()
+      setTimelinePlans(normalizeTimelineWorkbook(buffer))
+      setLogbookRecords(normalizeLogbookRecords(buffer))
+      setSourcePlans(normalizeWorkbook(buffer))
       setTimelineFileName(file.name)
+      setSourceFileName(file.name)
     } catch {
       setTimelineError('The selected file could not be analyzed. Check that it is a valid Excel workbook.')
     } finally {
@@ -513,12 +551,32 @@ function App() {
       </aside>
 
       <main className="main-content">
-          <header className="topbar">
+        <header className="topbar no-print">
           <button className="mobile-menu icon-button" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20} /></button>
           <div className="breadcrumbs"><strong>{activeView}</strong></div>
         </header>
 
-        <MaintenancePlanDashboard plans={timelinePlans} loading={timelineLoading} error={timelineError} fileName={timelineFileName} onUpload={handleTimelineUpload} onExport={(plans, line) => { setCriticalReportPlans(plans); exportPlanDashboardPdf({ plans, line }) }} />
+        {activeView === 'Logbook' ? (
+          <Logbook
+            records={logbookRecords}
+            loading={timelineLoading}
+            error={timelineError}
+            fileName={timelineFileName}
+            onUpload={handleTimelineUpload}
+          />
+        ) : (
+          <MaintenancePlanDashboard
+            plans={timelinePlans}
+            loading={timelineLoading}
+            error={timelineError}
+            fileName={timelineFileName}
+            onUpload={handleTimelineUpload}
+            onExport={(plans, line) => {
+              setCriticalReportPlans(plans)
+              exportPlanDashboardPdf({ plans, line })
+            }}
+          />
+        )}
       </main>
       {showModal && <AddTaskModal onClose={() => setShowModal(false)} onAdd={(newTask) => { setTasks((current) => [{ ...newTask, id: Date.now() }, ...current]); setShowModal(false) }} />}
     </div>
@@ -622,6 +680,38 @@ function normalizeTimelineWorkbook(buffer) {
     const riskStage = getRiskStage(delayDays, periodDays, lastCompleted, lastScheduled)
     return { id: `timeline-${index}`, machine: group.machine, activity: group.activity, planCode: group.planCode, frequency, lastCompleted, lastScheduled, nextDue, daysOverdue, delayDays, periodDays, totalOrders: group.dates.length, completedOrders: completions.length, criticality: getCriticality(daysOverdue), riskStage }
   }).sort((a, b) => b.daysOverdue - a.daysOverdue || a.machine.localeCompare(b.machine) || a.activity.localeCompare(b.activity))
+}
+
+function normalizeLogbookRecords(buffer) {
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' })
+  return rows.map((row, index) => {
+    const rawDescription = String(row['Maintenance item description'] || '').trim()
+    const separator = rawDescription.indexOf(' - ')
+    const machine = normalizeMachineName(separator > 0 ? rawDescription.slice(0, separator).trim() : 'General / site-wide')
+    const activity = separator > 0 ? rawDescription.slice(separator + 3).trim() : rawDescription
+    const scheduledDate = toDate(row['Scheduled start date'])
+    const completionDate = toDate(row['Completion date'])
+    const isCompleted = Boolean(completionDate)
+    const isOverdue = scheduledDate && !completionDate && scheduledDate < new Date('2026-09-10')
+    const status = isCompleted ? 'Completed' : isOverdue ? 'Overdue' : 'Scheduled'
+
+    return {
+      id: `log-${index + 1}`,
+      rowNumber: index + 1,
+      line: machine,
+      itemCode: String(row['Maintenance item'] || '').trim() || '—',
+      planCode: String(row['Maintenance Plan'] || '').trim() || 'Unassigned',
+      strategy: String(row['Maintenance strategy'] || '').trim() || '—',
+      description: rawDescription || '—',
+      activity,
+      callNo: row['MntPlan Call No.'] !== '' && row['MntPlan Call No.'] !== undefined ? String(row['MntPlan Call No.']) : '—',
+      scheduledDate,
+      completionDate,
+      order: String(row['Order'] || '').trim() || '—',
+      status,
+    }
+  })
 }
 
 function getNextDueDate(date, frequency) {
@@ -747,22 +837,342 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   const machines = useMemo(() => [...new Set(plans.map((plan) => plan.machine))].sort(), [plans])
   const visiblePlans = useMemo(() => plans.filter((plan) => lineFilter === 'All production lines' || plan.machine === lineFilter), [plans, lineFilter])
   const prioritizedPlans = useMemo(() => [...visiblePlans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0)), [visiblePlans])
-  const criticalCount = visiblePlans.filter((plan) => plan.criticality === 'Critical').length
-  const overdueCount = visiblePlans.filter((plan) => plan.daysOverdue > 0 && plan.criticality !== 'Critical').length
-  const dueSoonCount = visiblePlans.filter((plan) => plan.criticality === 'Due soon').length
-  const completedCount = visiblePlans.filter((plan) => plan.lastCompleted && plan.daysOverdue <= 0).length
 
   if (loading) return <div className="page-wrap loading-state"><div className="loading-spinner" /><h2>Reading maintenance dashboard</h2><p>Preparing equipment plans, execution history, and priorities.</p></div>
   if (error) return <div className="page-wrap loading-state"><AlertTriangle size={28} /><h2>Workbook unavailable</h2><p>{error}</p></div>
 
   return <div className="page-wrap plan-dashboard-page">
-    <div className="plan-dashboard-head"><div><div className="eyebrow">Maintenance intelligence / live plan control</div><h1>Dashboard do Plano de Manutenção</h1><p>Monitoramento operacional por equipamento e linha de produção.</p></div><div className="intro-actions"><label className="button button-primary upload-button"><Upload size={17} />Upload Excel<input type="file" accept=".xlsx,.xls" onChange={onUpload} /></label><button className="button button-secondary" onClick={() => onExport(visiblePlans, lineFilter)}><FileDown size={15} />Report</button></div></div>
-    <div className="plan-source-strip"><div className="file-icon">XLS</div><div><strong>{fileName}</strong><span>{plans.length} planos analisados · execução e vencimento</span></div><span className="live-pill"><i />Live</span></div>
-    <section className="plan-filter-panel"><div className="filter-title"><SlidersHorizontal size={16} /><strong>Filtros de operação</strong><span>Centralize os planos por linha.</span></div><div className="plan-filter-controls"><label><span>Production line</span><div className="select-wrap"><Filter size={15} /><select value={lineFilter} onChange={(event) => setLineFilter(event.target.value)}><option>All production lines</option>{machines.map((machine) => <option key={machine}>{machine}</option>)}</select><ChevronDown size={14} /></div></label><div className="filter-result"><small>Current scope</small><strong>{lineFilter}</strong><span>{visiblePlans.length} maintenance plans</span></div></div></section>
-    <div className="asset-status-strip"><div className="asset-status-title"><Activity size={17} /><strong>Asset status</strong><span>Quick status summary</span></div><div className="asset-status-items"><span><i className="status-dot status-green" />{completedCount} on track</span><span><i className="status-dot status-orange" />{dueSoonCount} due soon</span><span><i className="status-dot status-red" />{criticalCount + overdueCount} attention</span><span><i className="status-dot status-blue" />{visiblePlans.length} plans in scope</span></div></div>
-    <div className="plan-dashboard-layout"><main className="plan-dashboard-main"><div className="dashboard-section-heading"><div><span className="section-kicker">Plan portfolio</span><h2>{lineFilter}</h2><p>Cards ordered by urgency, with overdue activities first.</p></div><span className="scope-count">{visiblePlans.length} plans</span></div><div className="maintenance-plan-cards">{prioritizedPlans.slice(0, 12).map((plan) => <MaintenancePlanCard key={plan.id} plan={plan} />)}{!visiblePlans.length && <div className="empty-dashboard">No plans match the selected filter.</div>}</div></main>
-      <aside className="priority-panel"><div className="priority-panel-heading"><div><span className="section-kicker">Priority queue</span><h2>Prioritized activities</h2><p>Criticality and delay order</p></div><span className="priority-count">{prioritizedPlans.length}</span></div><div className="priority-list">{prioritizedPlans.slice(0, 10).map((plan, index) => <PriorityActivity key={plan.id} plan={plan} rank={index + 1} />)}{!prioritizedPlans.length && <div className="empty-dashboard">No activities in scope.</div>}</div><div className="priority-footer"><span><i className="status-dot status-red" />Most overdue first</span><ArrowUpRight size={15} /></div></aside></div>
+    <div className="plan-dashboard-head">
+      <div>
+        <div className="eyebrow">Maintenance intelligence / live plan control</div>
+        <h1>Maintenance Plan Dashboard</h1>
+        <p>Operational monitoring by equipment and production line.</p>
+      </div>
+      <div className="intro-actions no-print">
+        <label className="button button-primary upload-button"><Upload size={17} />Upload Excel<input type="file" accept=".xlsx,.xls" onChange={onUpload} /></label>
+        <button className="button button-secondary" onClick={() => onExport(visiblePlans, lineFilter)}><FileDown size={15} />Report</button>
+      </div>
+    </div>
+    <div className="plan-source-strip">
+      <div className="file-icon">XLS</div>
+      <div>
+        <strong>{fileName}</strong>
+        <span>{plans.length} plans analyzed · execution and due dates</span>
+      </div>
+      <span className="live-pill"><i />Live</span>
+    </div>
+    <section className="plan-filter-panel no-print">
+      <div className="filter-title">
+        <SlidersHorizontal size={16} />
+        <strong>Operation Filters</strong>
+        <span>Filter maintenance plans by line.</span>
+      </div>
+      <div className="plan-filter-controls">
+        <label>
+          <span>Production line</span>
+          <div className="select-wrap">
+            <Filter size={15} />
+            <select value={lineFilter} onChange={(event) => setLineFilter(event.target.value)}>
+              <option>All production lines</option>
+              {machines.map((machine) => <option key={machine}>{machine}</option>)}
+            </select>
+            <ChevronDown size={14} />
+          </div>
+        </label>
+        <div className="filter-result">
+          <small>Current scope</small>
+          <strong>{lineFilter}</strong>
+          <span>{visiblePlans.length} maintenance plans</span>
+        </div>
+      </div>
+    </section>
+    <div className="plan-dashboard-layout">
+      <main className="plan-dashboard-main">
+        <div className="dashboard-section-heading">
+          <div>
+            <span className="section-kicker">Plan portfolio</span>
+            <h2>{lineFilter}</h2>
+            <p>Cards ordered by urgency, with overdue activities first.</p>
+          </div>
+          <span className="scope-count">{visiblePlans.length} plans</span>
+        </div>
+        <div className="maintenance-plan-cards">
+          {prioritizedPlans.slice(0, 12).map((plan) => <MaintenancePlanCard key={plan.id} plan={plan} />)}
+          {!visiblePlans.length && <div className="empty-dashboard">No plans match the selected filter.</div>}
+        </div>
+      </main>
+      <aside className="priority-panel">
+        <div className="priority-panel-heading">
+          <div>
+            <span className="section-kicker">Priority queue</span>
+            <h2>Prioritized activities</h2>
+            <p>Criticality and delay order</p>
+          </div>
+          <span className="priority-count">{prioritizedPlans.length}</span>
+        </div>
+        <div className="priority-list">
+          {prioritizedPlans.slice(0, 10).map((plan, index) => <PriorityActivity key={plan.id} plan={plan} rank={index + 1} />)}
+          {!prioritizedPlans.length && <div className="empty-dashboard">No activities in scope.</div>}
+        </div>
+        <div className="priority-footer">
+          <span><i className="status-dot status-red" />Most overdue first</span>
+          <ArrowUpRight size={15} />
+        </div>
+      </aside>
+    </div>
   </div>
+}
+
+function Logbook({ records, loading, error, fileName, onUpload }) {
+  const [lineFilter, setLineFilter] = useState('All production lines')
+  const [statusFilter, setStatusFilter] = useState('All statuses')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [pageSize, setPageSize] = useState(50)
+  const [currentPage, setCurrentPage] = useState(1)
+
+  const lines = useMemo(() => [...new Set(records.map((r) => r.line))].sort(), [records])
+
+  const filteredRecords = useMemo(() => {
+    return records.filter((record) => {
+      const matchLine = lineFilter === 'All production lines' || record.line === lineFilter
+      const matchStatus = statusFilter === 'All statuses' || record.status === statusFilter
+      const query = searchQuery.trim().toLowerCase()
+      const matchSearch = !query || (
+        record.description.toLowerCase().includes(query) ||
+        record.planCode.toLowerCase().includes(query) ||
+        record.itemCode.toLowerCase().includes(query) ||
+        record.order.toLowerCase().includes(query) ||
+        record.line.toLowerCase().includes(query)
+      )
+      return matchLine && matchStatus && matchSearch
+    })
+  }, [records, lineFilter, statusFilter, searchQuery])
+
+  const totalFiltered = filteredRecords.length
+  const totalPages = pageSize === 'All' ? 1 : Math.max(1, Math.ceil(totalFiltered / Number(pageSize)))
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [lineFilter, statusFilter, searchQuery, pageSize])
+
+  const paginatedRecords = useMemo(() => {
+    if (pageSize === 'All') return filteredRecords
+    const size = Number(pageSize)
+    const start = (currentPage - 1) * size
+    return filteredRecords.slice(start, start + size)
+  }, [filteredRecords, currentPage, pageSize])
+
+  const completedCount = useMemo(() => filteredRecords.filter((r) => r.status === 'Completed').length, [filteredRecords])
+  const overdueCount = useMemo(() => filteredRecords.filter((r) => r.status === 'Overdue').length, [filteredRecords])
+  const scheduledCount = useMemo(() => filteredRecords.filter((r) => r.status === 'Scheduled').length, [filteredRecords])
+  const complianceRate = totalFiltered ? Math.round((completedCount / totalFiltered) * 100) : 0
+
+  if (loading) return <div className="page-wrap loading-state"><div className="loading-spinner" /><h2>Reading maintenance logbook</h2><p>Preparing records, orders, and execution dates.</p></div>
+  if (error) return <div className="page-wrap loading-state"><AlertTriangle size={28} /><h2>Workbook unavailable</h2><p>{error}</p></div>
+
+  return (
+    <div className="page-wrap logbook-page">
+      <div className="plan-dashboard-head">
+        <div>
+          <div className="eyebrow">Maintenance log & complete history</div>
+          <h1>Maintenance Logbook</h1>
+          <p>Complete standardized list of all maintenance orders and items from the workbook.</p>
+        </div>
+        <div className="intro-actions no-print">
+          <label className="button button-primary upload-button">
+            <Upload size={17} />Upload Excel
+            <input type="file" accept=".xlsx,.xls" onChange={onUpload} />
+          </label>
+          <button className="button button-secondary" onClick={() => exportLogbookCsv(filteredRecords, lineFilter)}>
+            <Download size={15} />Export CSV
+          </button>
+          <button className="button button-secondary" onClick={() => window.print()}>
+            <Printer size={15} />Print
+          </button>
+        </div>
+      </div>
+
+      <div className="plan-source-strip">
+        <div className="file-icon">XLS</div>
+        <div>
+          <strong>{fileName}</strong>
+          <span>{records.length.toLocaleString()} total workbook records · {totalFiltered.toLocaleString()} matching current filters</span>
+        </div>
+        <span className="live-pill"><i />Live log</span>
+      </div>
+
+      <div className="logbook-kpi-summary">
+        <div className="logbook-kpi-card">
+          <small>Total Records</small>
+          <strong>{totalFiltered.toLocaleString()}</strong>
+          <span>in current view</span>
+        </div>
+        <div className="logbook-kpi-card">
+          <small>Completed</small>
+          <strong className="kpi-green">{completedCount.toLocaleString()}</strong>
+          <span>with completion date</span>
+        </div>
+        <div className="logbook-kpi-card">
+          <small>Overdue</small>
+          <strong className="kpi-red">{overdueCount.toLocaleString()}</strong>
+          <span>scheduled past due</span>
+        </div>
+        <div className="logbook-kpi-card">
+          <small>Scheduled</small>
+          <strong className="kpi-blue">{scheduledCount.toLocaleString()}</strong>
+          <span>pending / on track</span>
+        </div>
+        <div className="logbook-kpi-card">
+          <small>Compliance Rate</small>
+          <strong className="kpi-orange">{complianceRate}%</strong>
+          <span>completed / total</span>
+        </div>
+      </div>
+
+      <section className="plan-filter-panel no-print">
+        <div className="filter-title">
+          <SlidersHorizontal size={16} />
+          <strong>Logbook Controls & Filters</strong>
+          <span>Search and filter all rows by line, status, and keywords.</span>
+        </div>
+        <div className="logbook-filter-controls">
+          <label className="logbook-search-label">
+            <span>Search</span>
+            <div className="search-field">
+              <Search size={15} />
+              <input
+                type="text"
+                placeholder="Search by description, plan, item, order..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button className="icon-button" onClick={() => setSearchQuery('')} aria-label="Clear search">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </label>
+          <label>
+            <span>Production line</span>
+            <div className="select-wrap">
+              <Filter size={15} />
+              <select value={lineFilter} onChange={(e) => setLineFilter(e.target.value)}>
+                <option>All production lines</option>
+                {lines.map((line) => <option key={line}>{line}</option>)}
+              </select>
+              <ChevronDown size={14} />
+            </div>
+          </label>
+          <label>
+            <span>Status</span>
+            <div className="select-wrap">
+              <ClipboardCheck size={15} />
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option>All statuses</option>
+                <option>Completed</option>
+                <option>Overdue</option>
+                <option>Scheduled</option>
+              </select>
+              <ChevronDown size={14} />
+            </div>
+          </label>
+          <div className="filter-result">
+            <small>Scope</small>
+            <strong>{lineFilter === 'All production lines' ? 'All Lines' : lineFilter}</strong>
+            <span>{totalFiltered.toLocaleString()} records found</span>
+          </div>
+        </div>
+      </section>
+
+      <div className="logbook-table-panel">
+        <div className="logbook-table-wrapper">
+          <table className="logbook-table">
+            <thead>
+              <tr>
+                <th style={{ width: '45px' }}>#</th>
+                <th style={{ width: '130px' }}>Line / Machine</th>
+                <th style={{ width: '110px' }}>Plan Code</th>
+                <th style={{ width: '90px' }}>Item Code</th>
+                <th>Description / Task</th>
+                <th style={{ width: '70px' }}>Call No.</th>
+                <th style={{ width: '110px' }}>Scheduled Date</th>
+                <th style={{ width: '110px' }}>Completion Date</th>
+                <th style={{ width: '90px' }}>Order</th>
+                <th style={{ width: '100px' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedRecords.map((r, i) => (
+                <tr key={r.id} className={`logbook-row status-row-${r.status.toLowerCase()}`}>
+                  <td className="logbook-cell-num">{pageSize === 'All' ? i + 1 : (currentPage - 1) * Number(pageSize) + i + 1}</td>
+                  <td><span className="logbook-line-badge">{r.line}</span></td>
+                  <td><code>{r.planCode}</code></td>
+                  <td><span className="logbook-item-code">{r.itemCode}</span></td>
+                  <td className="logbook-cell-desc"><strong>{r.description}</strong></td>
+                  <td className="logbook-cell-center">{r.callNo}</td>
+                  <td className="logbook-cell-date">{r.scheduledDate ? formatPrintDate(r.scheduledDate) : '—'}</td>
+                  <td className="logbook-cell-date">{r.completionDate ? formatPrintDate(r.completionDate) : '—'}</td>
+                  <td><code>{r.order}</code></td>
+                  <td>
+                    <span className={`logbook-status-badge badge-${r.status.toLowerCase()}`}>
+                      <i />{r.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {!paginatedRecords.length && (
+                <tr>
+                  <td colSpan={10} className="empty-table-cell">
+                    No logbook records match the selected filters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="logbook-pagination-bar no-print">
+          <div className="pagination-info">
+            Showing <strong>{totalFiltered === 0 ? 0 : (currentPage - 1) * (pageSize === 'All' ? totalFiltered : Number(pageSize)) + 1}</strong> to <strong>{pageSize === 'All' ? totalFiltered : Math.min(totalFiltered, currentPage * Number(pageSize))}</strong> of <strong>{totalFiltered.toLocaleString()}</strong> records
+          </div>
+          <div className="pagination-controls">
+            <div className="page-size-selector">
+              <span>Rows per page:</span>
+              <select value={pageSize} onChange={(e) => setPageSize(e.target.value)}>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="250">250</option>
+                <option value="All">All</option>
+              </select>
+            </div>
+            {pageSize !== 'All' && totalPages > 1 && (
+              <div className="page-buttons">
+                <button
+                  className="icon-button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span>Page {currentPage} of {totalPages}</span>
+                <button
+                  className="icon-button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  aria-label="Next page"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function MaintenancePlanCard({ plan }) {
