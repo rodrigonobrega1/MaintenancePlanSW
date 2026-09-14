@@ -135,6 +135,23 @@
 .plan-state.state-on-track { color: #2e7d4a; font-weight: 700; }
 .plan-state.state-on-track i { background: #2e7d4a; }
 .overdue-text { color: #be4b40 !important; font-weight: 700 !important; }
+
+/* Report Shutdown Modal */
+.report-modal { width: min(490px, 100%); }
+.report-shutdown-form { display: grid; gap: 16px; }
+.shutdown-date-field { display: grid; gap: 6px; }
+.shutdown-date-field > span { color: #525d66; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+.date-input-wrap { display: flex; align-items: center; gap: 8px; border: 1px solid #dce0e3; border-radius: 6px; background: #fff; padding: 0 10px; height: 42px; transition: border-color .15s ease; }
+.date-input-wrap:focus-within { border-color: #d9823b; box-shadow: 0 0 0 3px #d9823b18; }
+.date-input-wrap input[type="date"] { flex: 1; border: none; outline: none; font: inherit; font-size: 13px; color: #2e353c; background: transparent; }
+.shutdown-status-note { color: #889299; font-size: 10.5px; line-height: 1.4; }
+.shutdown-status-note strong { color: #2e353c; }
+.report-summary-box { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 11px 13px; background: #f8faf9; border: 1px solid #e0e6e3; border-radius: 6px; }
+.report-summary-box > div { display: grid; gap: 3px; }
+.report-summary-box small { color: #8a9299; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+.report-summary-box strong { color: #323a41; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-green { color: #2e7d4a !important; }
+.text-orange { color: #d9823b !important; }
 .spin { animation: report-spin .8s linear infinite; }
 @keyframes report-spin { to { transform: rotate(360deg); } }
 @media print {

@@ -177,91 +177,231 @@ function exportCriticalPdf(plans, pdf = new jsPDF({ orientation: 'landscape', un
   if (save) pdf.save('critical-view-report.pdf')
 }
 
-function exportPlanDashboardPdf({ plans, line, notes = [] }) {
+function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) {
   const ordered = [...plans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
-  const pageHeight = 210
   const cardWidth = 87
   const cardHeight = 38
   const cardGap = 6
+  const pageToken = '{total_pages_count_string}'
+
   const statusColor = (plan) => {
     if (plan.daysOverdue > 30 || plan.criticality === 'Critical') return [201, 104, 95]
     if (plan.daysOverdue > 0 || plan.criticality === 'Due soon') return [223, 157, 85]
     return [103, 168, 118]
   }
-  const header = (continued = false) => {
+
+  const shutdownLabel = shutdownDate ? formatPrintDate(shutdownDate) : 'Date to be defined'
+
+  const drawHeader = (title, subtitle) => {
     pdf.setTextColor(37, 40, 45)
     pdf.setFont('helvetica', 'bold')
-    pdf.setFontSize(19)
-    pdf.text(continued ? 'Prioritized maintenance activities' : 'Maintenance plan cards', 12, 15)
-    pdf.setTextColor(185, 106, 53)
+    pdf.setFontSize(18)
+    pdf.text(title, 12, 14)
+
     pdf.setFontSize(8)
-    pdf.text(`LINE: ${line}`, 12, 22)
-    pdf.setDrawColor(224, 227, 230)
-    pdf.line(12, 26, pageWidth - 12, 26)
+    pdf.setTextColor(185, 106, 53)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(`LINE / MACHINE: ${line.toUpperCase()}`, 12, 20)
+
+    pdf.setTextColor(80, 88, 95)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text(`MAINTENANCE SHUTDOWN DATE: ${shutdownLabel.toUpperCase()}`, 110, 20)
+    pdf.text(`ISSUED: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, 232, 20)
+
+    pdf.setDrawColor(220, 224, 228)
+    pdf.setLineWidth(0.6)
+    pdf.line(12, 23, pageWidth - 12, 23)
+
+    if (subtitle) {
+      pdf.setTextColor(110, 118, 125)
+      pdf.setFontSize(8)
+      pdf.text(subtitle, 12, 28)
+    }
   }
-  const drawCard = (plan, index) => {
+
+  const drawFooter = () => {
+    const page = pdf.getNumberOfPages()
+    pdf.setTextColor(140, 146, 153)
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(7)
+    pdf.text(`Maintenance Planning · Plant Operational Report · Line: ${line} · Shutdown Date: ${shutdownLabel}`, 12, 203)
+    pdf.text(`Page ${page} of ${pageToken}`, pageWidth - 32, 203)
+  }
+
+  // --- PAGE 1: Top Priority Cards ---
+  const topCards = ordered.slice(0, 12)
+  drawHeader(
+    'Top Priority Maintenance Plans',
+    `Top ${topCards.length} prioritized plans from active queue · Complete list of all ${ordered.length} plans continues on next pages`
+  )
+
+  topCards.forEach((plan, index) => {
     const column = index % 3
     const row = Math.floor(index / 3)
     const x = 12 + column * (cardWidth + cardGap)
     const y = 31 + row * (cardHeight + 3)
     const color = statusColor(plan)
     const isOverdue = plan.daysOverdue > 0
+
     pdf.setFillColor(252, 252, 251)
     pdf.setDrawColor(...color)
     pdf.setLineWidth(1)
     pdf.roundedRect(x, y, cardWidth, cardHeight, 2, 2, 'FD')
-    pdf.setTextColor(90, 98, 105); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text(plan.frequency, x + 6, y + 8)
-    pdf.setTextColor(...color); pdf.setFontSize(8);
+
+    pdf.setTextColor(90, 98, 105)
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(9)
+    pdf.text(plan.frequency, x + 6, y + 8)
+
+    pdf.setTextColor(...color)
+    pdf.setFontSize(8)
     const badgeText = isOverdue ? `${plan.daysOverdue}d overdue` : plan.criticality === 'Due soon' ? 'Due soon' : 'On track'
     pdf.text(badgeText, x + (cardWidth - 6 - pdf.getTextWidth(badgeText)), y + 8)
-    pdf.setTextColor(47, 55, 61); pdf.setFontSize(10); pdf.text(plan.activity.slice(0, 31), x + 6, y + 17)
-    pdf.setTextColor(125, 133, 140); pdf.setFontSize(8); pdf.text(`${plan.machine} · ${plan.planCode}`.slice(0, 38), x + 6, y + 24)
+
+    pdf.setTextColor(47, 55, 61)
+    pdf.setFontSize(10)
+    pdf.text(plan.activity.slice(0, 31), x + 6, y + 17)
+
+    pdf.setTextColor(125, 133, 140)
+    pdf.setFontSize(8)
+    pdf.text(`${plan.machine} · ${plan.planCode}`.slice(0, 38), x + 6, y + 24)
     pdf.text(`Last: ${plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed'}`, x + 6, y + 30)
     pdf.text(`Next: ${plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned'}`, x + 6, y + 35)
-  }
-  header()
-  pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(`${Math.min(ordered.length, 12)} plans shown · filtered dashboard view`, 12, 29)
-  ordered.slice(0, 12).forEach(drawCard)
-  pdf.addPage()
-  header(true)
-  pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text('Top 10 activities, ordered by delay and severity', 12, 32)
-  const listStart = 38
-  pdf.setFillColor(239, 241, 243); pdf.rect(12, listStart, 273, 9, 'F')
-  pdf.setTextColor(100, 108, 115); pdf.setFontSize(8); pdf.text('Rank', 16, listStart + 6); pdf.text('Activity', 35, listStart + 6); pdf.text('Machine', 145, listStart + 6); pdf.text('Due date / Overdue', 205, listStart + 6); pdf.text('Severity', 260, listStart + 6)
-  ordered.slice(0, 10).forEach((plan, index) => {
-    const rowY = listStart + 16 + index * 10
-    const color = statusColor(plan)
-    const isOverdue = plan.daysOverdue > 0
-    pdf.setDrawColor(232, 234, 236); pdf.line(12, rowY + 3.5, 285, rowY + 3.5)
-    pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.text(String(index + 1).padStart(2, '0'), 16, rowY)
-    pdf.setTextColor(54, 62, 69); pdf.text(plan.activity.slice(0, 56), 35, rowY)
-    pdf.setTextColor(112, 121, 128); pdf.text(plan.machine.slice(0, 28), 145, rowY)
-    if (isOverdue) {
-      pdf.setTextColor(...color); pdf.setFont('helvetica', 'bold')
-      pdf.text(`${plan.daysOverdue} days overdue`, 205, rowY)
-    } else {
-      pdf.setTextColor(112, 121, 128); pdf.setFont('helvetica', 'normal')
-      pdf.text(plan.nextDue ? `Due ${formatPrintDate(plan.nextDue)}` : 'To be planned', 205, rowY)
-    }
-    pdf.setTextColor(...color); pdf.setFont('helvetica', 'bold')
-    pdf.text(isOverdue ? (plan.daysOverdue > 30 ? 'Critical' : 'Overdue') : (plan.criticality === 'Due soon' ? 'Due soon' : 'On track'), 260, rowY)
   })
 
-  if (notes && notes.length > 0) {
-    const notesStart = Math.min(156, listStart + 16 + Math.min(10, ordered.length) * 10 + 5)
-    pdf.setFillColor(254, 252, 246); pdf.setDrawColor(217, 130, 59); pdf.setLineWidth(0.6)
-    pdf.roundedRect(12, notesStart, 273, Math.min(42, 10 + Math.min(notes.length, 4) * 7), 1.5, 1.5, 'FD')
-    pdf.setTextColor(185, 106, 53); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5)
-    pdf.text(`TEAM OPERATIONAL NOTES & INSTRUCTIONS (${notes.length})`, 16, notesStart + 6)
-    pdf.setTextColor(60, 68, 75); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5)
-    notes.slice(0, 4).forEach((note, idx) => {
-      const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
-      pdf.text(`• [${note.line === 'All production lines' ? 'All Lines' : note.line}] ${note.text}${dateStr ? ` (${dateStr})` : ''}`.slice(0, 130), 16, notesStart + 12 + idx * 6.5)
+  drawFooter()
+
+  // --- PAGE 2+: Full List of ALL Plans for the Selected Line ---
+  const rowsPerPage = 15
+  const totalListPages = Math.ceil(ordered.length / rowsPerPage) || 1
+
+  const tableColumns = [
+    { label: 'Rank', x: 15 },
+    { label: 'Activity / Maintenance Task', x: 30 },
+    { label: 'Machine / Tag', x: 130 },
+    { label: 'Frequency', x: 172 },
+    { label: 'Plan Code', x: 196 },
+    { label: 'Due Date / Overdue Status', x: 226 },
+    { label: 'Severity', x: 268 },
+  ]
+
+  for (let p = 0; p < totalListPages; p++) {
+    pdf.addPage()
+    drawHeader(
+      'Complete Maintenance Plan Portfolio',
+      `Complete list of all ${ordered.length} plans for ${line} · Ordered by delay and criticality (Page ${p + 1} of ${totalListPages})`
+    )
+
+    const listStart = 33
+    // Table header background
+    pdf.setFillColor(239, 241, 244)
+    pdf.rect(12, listStart, 273, 8, 'F')
+    pdf.setTextColor(70, 78, 85)
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(7.5)
+    tableColumns.forEach((col) => pdf.text(col.label, col.x, listStart + 5.5))
+
+    const pagePlans = ordered.slice(p * rowsPerPage, (p + 1) * rowsPerPage)
+    pagePlans.forEach((plan, idx) => {
+      const overallIndex = p * rowsPerPage + idx
+      const rowY = listStart + 13 + idx * 8.5
+      const color = statusColor(plan)
+      const isOverdue = plan.daysOverdue > 0
+
+      pdf.setDrawColor(235, 238, 240)
+      pdf.setLineWidth(0.4)
+      pdf.line(12, rowY + 2.5, 285, rowY + 2.5)
+
+      pdf.setTextColor(145, 151, 157)
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(7)
+      pdf.text(String(overallIndex + 1).padStart(2, '0'), 15, rowY)
+
+      pdf.setTextColor(45, 52, 58)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text(plan.activity.slice(0, 56), 30, rowY)
+
+      pdf.setTextColor(100, 108, 115)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text(plan.machine.slice(0, 22), 130, rowY)
+      pdf.text(plan.frequency, 172, rowY)
+      pdf.text(plan.planCode.slice(0, 15), 196, rowY)
+
+      if (isOverdue) {
+        pdf.setTextColor(...color)
+        pdf.setFont('helvetica', 'bold')
+        pdf.text(`${plan.daysOverdue}d overdue (${plan.nextDue ? formatPrintDate(plan.nextDue) : 'No date'})`.slice(0, 28), 226, rowY)
+      } else {
+        pdf.setTextColor(100, 108, 115)
+        pdf.setFont('helvetica', 'normal')
+        pdf.text(plan.nextDue ? `Due ${formatPrintDate(plan.nextDue)}` : 'To be planned', 226, rowY)
+      }
+
+      pdf.setTextColor(...color)
+      pdf.setFont('helvetica', 'bold')
+      const sevLabel = isOverdue ? (plan.daysOverdue > 30 ? 'Critical' : 'Overdue') : (plan.criticality === 'Due soon' ? 'Due soon' : 'On track')
+      pdf.text(sevLabel, 268, rowY)
     })
+
+    // If on the last page and notes exist, print notes section if space allows or add page
+    if (p === totalListPages - 1 && notes && notes.length > 0) {
+      const lastRowY = listStart + 13 + pagePlans.length * 8.5
+      if (lastRowY <= 158) {
+        const notesStartY = Math.max(lastRowY + 6, 148)
+        const availableHeight = 198 - notesStartY
+
+        pdf.setFillColor(254, 252, 246)
+        pdf.setDrawColor(217, 130, 59)
+        pdf.setLineWidth(0.6)
+        pdf.roundedRect(12, notesStartY, 273, Math.min(42, availableHeight), 1.5, 1.5, 'FD')
+
+        pdf.setTextColor(185, 106, 53)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(8)
+        pdf.text(`TEAM OPERATIONAL NOTES & SHIFT INSTRUCTIONS (${notes.length})`, 16, notesStartY + 5.5)
+
+        pdf.setTextColor(60, 68, 75)
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(7)
+        notes.slice(0, 4).forEach((note, nIdx) => {
+          const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
+          pdf.text(`• [${note.line === 'All production lines' ? 'Global' : note.line}] ${note.text}${dateStr ? ` (${dateStr})` : ''}`.slice(0, 135), 16, notesStartY + 11.5 + nIdx * 5.5)
+        })
+      } else {
+        // Overflow to dedicated notes page
+        pdf.addPage()
+        drawHeader(
+          'Team Operational Notes & Shift Instructions',
+          `Directives and operational reminders for ${line} · Shutdown: ${shutdownLabel}`
+        )
+
+        const notesStartY = 35
+        pdf.setFillColor(254, 252, 246)
+        pdf.setDrawColor(217, 130, 59)
+        pdf.setLineWidth(0.6)
+        pdf.roundedRect(12, notesStartY, 273, Math.min(150, 14 + notes.length * 10), 1.5, 1.5, 'FD')
+
+        pdf.setTextColor(185, 106, 53)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(9)
+        pdf.text(`TEAM OPERATIONAL NOTES (${notes.length})`, 16, notesStartY + 7)
+
+        pdf.setTextColor(60, 68, 75)
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(8)
+        notes.forEach((note, nIdx) => {
+          const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
+          pdf.text(`• [${note.line === 'All production lines' ? 'Global' : note.line}] ${note.text}${dateStr ? ` (${dateStr})` : ''}`, 16, notesStartY + 15 + nIdx * 8)
+        })
+      }
+    }
+
+    drawFooter()
   }
 
+  pdf.putTotalPages(pageToken)
   pdf.save(`maintenance-plan-dashboard-${line.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pdf`)
 }
 
@@ -934,6 +1074,7 @@ function Dashboard({ tasks, report, uploadError, uploading, onUpload, onNavigate
 
 function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, onExport }) {
   const [lineFilter, setLineFilter] = useState('All production lines')
+  const [showReportModal, setShowReportModal] = useState(false)
   const [teamNotes, setTeamNotes] = useState(() => {
     try {
       const saved = localStorage.getItem(teamNotesStorageKey)
@@ -1016,7 +1157,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
       </div>
       <div className="intro-actions no-print">
         <label className="button button-primary upload-button"><Upload size={17} />Upload Excel<input type="file" accept=".xlsx,.xls" onChange={onUpload} /></label>
-        <button className="button button-secondary" onClick={() => onExport(visiblePlans, lineFilter, filteredNotes)}><FileDown size={15} />Report</button>
+        <button className="button button-secondary" onClick={() => setShowReportModal(true)}><FileDown size={15} />Report</button>
       </div>
     </div>
     <div className="plan-source-strip">
@@ -1214,6 +1355,18 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
         </div>
       </aside>
     </div>
+
+    {showReportModal && (
+      <ReportShutdownModal
+        line={lineFilter}
+        plansCount={visiblePlans.length}
+        onClose={() => setShowReportModal(false)}
+        onGenerate={(shutdownDate) => {
+          setShowReportModal(false)
+          onExport(visiblePlans, lineFilter, filteredNotes, shutdownDate)
+        }}
+      />
+    )}
   </div>
 }
 
@@ -1911,6 +2064,92 @@ function AddNoteModal({ weekDays, onClose, onAdd }) {
 function CopyNoteModal({ weekDays, note, onClose, onCopy }) {
   const [dayIndex, setDayIndex] = useState(0)
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal note-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><div className="eyebrow">Duplicate note</div><h2>Copy note to another day</h2><p className="modal-description">The original note will stay where it is.</p></div><button className="icon-button" onClick={onClose} aria-label="Close copy form"><X size={19} /></button></div><div className="copy-preview"><StickyNote size={15} /><span>{note.text}</span></div><label>Copy to<select value={dayIndex} onChange={(event) => setDayIndex(event.target.value)}>{weekDays.map((day) => <option key={day.index} value={day.index}>{day.label} {day.date}</option>)}</select></label><div className="modal-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button type="button" className="button button-primary" onClick={() => onCopy(Number(dayIndex))}><Copy size={15} />Copy note</button></div></div></div>
+}
+
+function ReportShutdownModal({ line, plansCount, onClose, onGenerate }) {
+  const [shutdownDate, setShutdownDate] = useState('')
+  const submit = (event) => {
+    event.preventDefault()
+    onGenerate(shutdownDate)
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal report-modal" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-heading">
+          <div>
+            <div className="eyebrow">Export Technical Report</div>
+            <h2>Maintenance Shutdown Date</h2>
+            <p className="modal-description">
+              Specify the planned shutdown date for <strong>{line}</strong> ({plansCount} plans in scope).
+            </p>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close dialog">
+            <X size={19} />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="report-shutdown-form">
+          <label className="shutdown-date-field">
+            <span>Machine Shutdown Date</span>
+            <div className="date-input-wrap">
+              <CalendarDays size={16} />
+              <input
+                type="date"
+                autoFocus
+                value={shutdownDate}
+                onChange={(event) => setShutdownDate(event.target.value)}
+              />
+              {shutdownDate && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setShutdownDate('')}
+                  title="Clear date"
+                  aria-label="Clear date"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <small className="shutdown-status-note">
+              {shutdownDate ? (
+                <>Scheduled for <strong>{formatPrintDate(shutdownDate)}</strong></>
+              ) : (
+                <>No date selected · Report will state: <strong>Date to be defined</strong></>
+              )}
+            </small>
+          </label>
+
+          <div className="report-summary-box">
+            <div>
+              <small>Selected Line</small>
+              <strong>{line}</strong>
+            </div>
+            <div>
+              <small>Total Plans</small>
+              <strong>{plansCount}</strong>
+            </div>
+            <div>
+              <small>Shutdown Status</small>
+              <strong className={shutdownDate ? 'text-green' : 'text-orange'}>
+                {shutdownDate ? formatPrintDate(shutdownDate) : 'Date to be defined'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="button button-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="button button-primary">
+              <FileDown size={15} /> Export PDF Report
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 function AddTaskModal({ onClose, onAdd }) {
