@@ -25,7 +25,9 @@ import {
   ListFilter,
   LoaderCircle,
   Menu,
+  MessageSquare,
   MoreHorizontal,
+  Pencil,
   Plus,
   Printer,
   RotateCcw,
@@ -58,6 +60,7 @@ const navItems = [
 
 const dashboardReportStorageKey = 'fieldmark-dashboard-report'
 const maintenanceScheduleStorageKey = 'fieldmark-maintenance-schedule'
+const teamNotesStorageKey = 'fieldmark-team-notes'
 
 async function downloadPdf(selector, fileName) {
   const element = document.querySelector(selector)
@@ -174,7 +177,7 @@ function exportCriticalPdf(plans, pdf = new jsPDF({ orientation: 'landscape', un
   if (save) pdf.save('critical-view-report.pdf')
 }
 
-function exportPlanDashboardPdf({ plans, line }) {
+function exportPlanDashboardPdf({ plans, line, notes = [] }) {
   const ordered = [...plans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
@@ -225,18 +228,32 @@ function exportPlanDashboardPdf({ plans, line }) {
   pdf.addPage()
   header(true)
   pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text('Top 10 activities, ordered by delay and severity', 12, 32)
-  const listStart = 42
-  pdf.setFillColor(239, 241, 243); pdf.rect(12, listStart, 273, 10, 'F')
+  const listStart = 38
+  pdf.setFillColor(239, 241, 243); pdf.rect(12, listStart, 273, 9, 'F')
   pdf.setTextColor(100, 108, 115); pdf.setFontSize(8); pdf.text('Rank', 16, listStart + 6); pdf.text('Activity', 35, listStart + 6); pdf.text('Machine', 150, listStart + 6); pdf.text('Due date', 210, listStart + 6); pdf.text('Severity', 257, listStart + 6)
   ordered.slice(0, 10).forEach((plan, index) => {
-    const rowY = listStart + 20 + index * 13
-    pdf.setDrawColor(232, 234, 236); pdf.line(12, rowY + 5, 285, rowY + 5)
-    pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(String(index + 1).padStart(2, '0'), 16, rowY)
+    const rowY = listStart + 16 + index * 10
+    pdf.setDrawColor(232, 234, 236); pdf.line(12, rowY + 3.5, 285, rowY + 3.5)
+    pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.text(String(index + 1).padStart(2, '0'), 16, rowY)
     pdf.setTextColor(54, 62, 69); pdf.text(plan.activity.slice(0, 58), 35, rowY)
     pdf.setTextColor(112, 121, 128); pdf.text(plan.machine.slice(0, 30), 150, rowY)
     pdf.text(plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned', 210, rowY)
     pdf.setTextColor(...statusColor(plan)); pdf.text(getSeverity(plan), 257, rowY)
   })
+
+  if (notes && notes.length > 0) {
+    const notesStart = Math.min(156, listStart + 16 + Math.min(10, ordered.length) * 10 + 5)
+    pdf.setFillColor(254, 252, 246); pdf.setDrawColor(217, 130, 59); pdf.setLineWidth(0.6)
+    pdf.roundedRect(12, notesStart, 273, Math.min(42, 10 + Math.min(notes.length, 4) * 7), 1.5, 1.5, 'FD')
+    pdf.setTextColor(185, 106, 53); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5)
+    pdf.text(`TEAM OPERATIONAL NOTES & INSTRUCTIONS (${notes.length})`, 16, notesStart + 6)
+    pdf.setTextColor(60, 68, 75); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5)
+    notes.slice(0, 4).forEach((note, idx) => {
+      const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
+      pdf.text(`• [${note.line === 'All production lines' ? 'All Lines' : note.line}] ${note.text}${dateStr ? ` (${dateStr})` : ''}`.slice(0, 130), 16, notesStart + 12 + idx * 6.5)
+    })
+  }
+
   pdf.save(`maintenance-plan-dashboard-${line.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pdf`)
 }
 
@@ -571,9 +588,9 @@ function App() {
             error={timelineError}
             fileName={timelineFileName}
             onUpload={handleTimelineUpload}
-            onExport={(plans, line) => {
+            onExport={(plans, line, notes) => {
               setCriticalReportPlans(plans)
-              exportPlanDashboardPdf({ plans, line })
+              exportPlanDashboardPdf({ plans, line, notes })
             }}
           />
         )}
@@ -834,9 +851,75 @@ function Dashboard({ tasks, report, uploadError, uploading, onUpload, onNavigate
 
 function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, onExport }) {
   const [lineFilter, setLineFilter] = useState('All production lines')
+  const [teamNotes, setTeamNotes] = useState(() => {
+    try {
+      const saved = localStorage.getItem(teamNotesStorageKey)
+      return saved ? JSON.parse(saved) : [
+        {
+          id: 'note-default-1',
+          text: 'Shift Handover: Ensure full safety interlock check before starting scheduled PM.',
+          line: 'All production lines',
+          createdAt: new Date().toISOString(),
+        },
+      ]
+    } catch {
+      return []
+    }
+  })
+  const [newNoteText, setNewNoteText] = useState('')
+  const [newNoteLine, setNewNoteLine] = useState('Current line')
+  const [editingNoteId, setEditingNoteId] = useState(null)
+  const [editingNoteText, setEditingNoteText] = useState('')
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(teamNotesStorageKey, JSON.stringify(teamNotes))
+    } catch {}
+  }, [teamNotes])
+
   const machines = useMemo(() => [...new Set(plans.map((plan) => plan.machine))].sort(), [plans])
   const visiblePlans = useMemo(() => plans.filter((plan) => lineFilter === 'All production lines' || plan.machine === lineFilter), [plans, lineFilter])
   const prioritizedPlans = useMemo(() => [...visiblePlans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0)), [visiblePlans])
+
+  const filteredNotes = useMemo(() => {
+    return teamNotes.filter((n) => lineFilter === 'All production lines' || n.line === 'All production lines' || n.line === lineFilter)
+  }, [teamNotes, lineFilter])
+
+  const handleAddNote = (e) => {
+    if (e) e.preventDefault()
+    const trimmed = newNoteText.trim()
+    if (!trimmed) return
+    const note = {
+      id: `note-${Date.now()}`,
+      text: trimmed,
+      line: newNoteLine === 'Current line' ? lineFilter : 'All production lines',
+      createdAt: new Date().toISOString(),
+    }
+    setTeamNotes((prev) => [note, ...prev])
+    setNewNoteText('')
+  }
+
+  const handleDeleteNote = (id) => {
+    setTeamNotes((prev) => prev.filter((n) => n.id !== id))
+  }
+
+  const handleStartEdit = (note) => {
+    setEditingNoteId(note.id)
+    setEditingNoteText(note.text)
+  }
+
+  const handleSaveEdit = (id) => {
+    const trimmed = editingNoteText.trim()
+    if (!trimmed) return
+    setTeamNotes((prev) => prev.map((n) => n.id === id ? { ...n, text: trimmed, updatedAt: new Date().toISOString() } : n))
+    setEditingNoteId(null)
+    setEditingNoteText('')
+  }
+
+  const handleCancelEdit = () => {
+    setEditingNoteId(null)
+    setEditingNoteText('')
+  }
 
   if (loading) return <div className="page-wrap loading-state"><div className="loading-spinner" /><h2>Reading maintenance dashboard</h2><p>Preparing equipment plans, execution history, and priorities.</p></div>
   if (error) return <div className="page-wrap loading-state"><AlertTriangle size={28} /><h2>Workbook unavailable</h2><p>{error}</p></div>
@@ -850,7 +933,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
       </div>
       <div className="intro-actions no-print">
         <label className="button button-primary upload-button"><Upload size={17} />Upload Excel<input type="file" accept=".xlsx,.xls" onChange={onUpload} /></label>
-        <button className="button button-secondary" onClick={() => onExport(visiblePlans, lineFilter)}><FileDown size={15} />Report</button>
+        <button className="button button-secondary" onClick={() => onExport(visiblePlans, lineFilter, filteredNotes)}><FileDown size={15} />Report</button>
       </div>
     </div>
     <div className="plan-source-strip">
@@ -882,12 +965,140 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
         <div className="filter-result">
           <small>Current scope</small>
           <strong>{lineFilter}</strong>
-          <span>{visiblePlans.length} maintenance plans</span>
+          <span>{visiblePlans.length} maintenance plans · {filteredNotes.length} team notes</span>
         </div>
       </div>
     </section>
+
     <div className="plan-dashboard-layout">
       <main className="plan-dashboard-main">
+        {/* Team Notes Section */}
+        <section className="team-notes-section">
+          <div className="team-notes-creator no-print">
+            <div className="notes-creator-header">
+              <div className="notes-creator-title">
+                <StickyNote size={15} />
+                <strong>Team Operational Notes & Shift Messages</strong>
+              </div>
+              <div className="notes-target-picker">
+                <span>Scope:</span>
+                <select value={newNoteLine} onChange={(e) => setNewNoteLine(e.target.value)}>
+                  <option value="Current line">Current Line ({lineFilter === 'All production lines' ? 'All Lines' : lineFilter})</option>
+                  <option value="All production lines">Global (All Lines)</option>
+                </select>
+              </div>
+            </div>
+            <div className="notes-input-row">
+              <textarea
+                className="notes-textarea"
+                placeholder="Type an operational note, shift handover, or priority instruction for the team..."
+                value={newNoteText}
+                onChange={(e) => setNewNoteText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    handleAddNote(e)
+                  }
+                }}
+                rows={2}
+              />
+              <button
+                className="button button-primary add-note-submit-btn"
+                disabled={!newNoteText.trim()}
+                onClick={handleAddNote}
+              >
+                <Plus size={15} /> Add Note
+              </button>
+            </div>
+          </div>
+
+          {filteredNotes.length > 0 && (
+            <div className="team-notes-list">
+              {filteredNotes.map((note) => (
+                <article key={note.id} className="team-note-card">
+                  <div className="team-note-card-top">
+                    <div className="team-note-meta">
+                      <span className="team-note-line-tag">
+                        <StickyNote size={12} />
+                        {note.line === 'All production lines' ? 'Global Note' : note.line}
+                      </span>
+                      <small className="team-note-date">
+                        {new Date(note.createdAt).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </small>
+                    </div>
+                    <div className="team-note-actions no-print">
+                      {editingNoteId === note.id ? (
+                        <>
+                          <button
+                            className="icon-button note-action-btn note-save-btn"
+                            onClick={() => handleSaveEdit(note.id)}
+                            title="Save note"
+                            aria-label="Save note"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            className="icon-button note-action-btn note-cancel-btn"
+                            onClick={handleCancelEdit}
+                            title="Cancel editing"
+                            aria-label="Cancel editing"
+                          >
+                            <X size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="icon-button note-action-btn note-edit-btn"
+                            onClick={() => handleStartEdit(note)}
+                            title="Edit note"
+                            aria-label="Edit note"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            className="icon-button note-action-btn note-delete-btn"
+                            onClick={() => handleDeleteNote(note.id)}
+                            title="Delete note"
+                            aria-label="Delete note"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {editingNoteId === note.id ? (
+                    <div className="team-note-inline-edit">
+                      <textarea
+                        value={editingNoteText}
+                        onChange={(e) => setEditingNoteText(e.target.value)}
+                        rows={2}
+                        autoFocus
+                      />
+                      <div className="team-note-edit-buttons">
+                        <button className="button button-primary note-small-btn" onClick={() => handleSaveEdit(note.id)}>
+                          Save Note
+                        </button>
+                        <button className="button button-secondary note-small-btn" onClick={handleCancelEdit}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="team-note-body">{note.text}</p>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
         <div className="dashboard-section-heading">
           <div>
             <span className="section-kicker">Plan portfolio</span>
