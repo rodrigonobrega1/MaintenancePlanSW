@@ -348,26 +348,42 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
     // If on the last page and notes exist, print notes section if space allows or add page
     if (p === totalListPages - 1 && notes && notes.length > 0) {
       const lastRowY = listStart + 13 + pagePlans.length * 8.5
-      if (lastRowY <= 158) {
-        const notesStartY = Math.max(lastRowY + 6, 148)
+      if (lastRowY <= 145) {
+        const notesStartY = Math.max(lastRowY + 6, 138)
         const availableHeight = 198 - notesStartY
 
         pdf.setFillColor(254, 252, 246)
         pdf.setDrawColor(217, 130, 59)
-        pdf.setLineWidth(0.6)
-        pdf.roundedRect(12, notesStartY, 273, Math.min(42, availableHeight), 1.5, 1.5, 'FD')
+        pdf.setLineWidth(0.8)
+        pdf.roundedRect(12, notesStartY, 273, Math.min(52, availableHeight), 2, 2, 'FD')
 
         pdf.setTextColor(185, 106, 53)
         pdf.setFont('helvetica', 'bold')
-        pdf.setFontSize(8)
-        pdf.text(`TEAM OPERATIONAL NOTES & SHIFT INSTRUCTIONS (${notes.length})`, 16, notesStartY + 5.5)
+        pdf.setFontSize(10.5)
+        pdf.text(`TEAM OPERATIONAL NOTES & SHIFT INSTRUCTIONS (${notes.length})`, 16, notesStartY + 7)
 
-        pdf.setTextColor(60, 68, 75)
-        pdf.setFont('helvetica', 'normal')
-        pdf.setFontSize(7)
+        pdf.setTextColor(45, 52, 58)
+        pdf.setFontSize(9)
         notes.slice(0, 4).forEach((note, nIdx) => {
           const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
-          pdf.text(`• [${note.line === 'All production lines' ? 'Global' : note.line}] ${note.text}${dateStr ? ` (${dateStr})` : ''}`.slice(0, 135), 16, notesStartY + 11.5 + nIdx * 5.5)
+          const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
+          const yPos = notesStartY + 15 + nIdx * 8
+
+          pdf.setTextColor(185, 106, 53)
+          pdf.setFont('helvetica', 'bold')
+          pdf.text(`• ${tag}`, 16, yPos)
+
+          pdf.setTextColor(45, 52, 58)
+          pdf.setFont('helvetica', 'normal')
+          const textOffset = 16 + pdf.getTextWidth(`• ${tag} `)
+          pdf.text(`${note.text}`.slice(0, 110), textOffset, yPos)
+
+          if (dateStr) {
+            pdf.setTextColor(125, 133, 140)
+            pdf.setFontSize(7.5)
+            pdf.text(`(${dateStr})`, 252, yPos)
+            pdf.setFontSize(9)
+          }
         })
       } else {
         // Overflow to dedicated notes page
@@ -377,23 +393,40 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
           `Directives and operational reminders for ${line} · Shutdown: ${shutdownLabel}`
         )
 
-        const notesStartY = 35
+        const notesStartY = 33
         pdf.setFillColor(254, 252, 246)
         pdf.setDrawColor(217, 130, 59)
-        pdf.setLineWidth(0.6)
-        pdf.roundedRect(12, notesStartY, 273, Math.min(150, 14 + notes.length * 10), 1.5, 1.5, 'FD')
+        pdf.setLineWidth(0.8)
+        pdf.roundedRect(12, notesStartY, 273, Math.min(156, 18 + notes.length * 15), 2, 2, 'FD')
 
         pdf.setTextColor(185, 106, 53)
         pdf.setFont('helvetica', 'bold')
-        pdf.setFontSize(9)
-        pdf.text(`TEAM OPERATIONAL NOTES (${notes.length})`, 16, notesStartY + 7)
+        pdf.setFontSize(11)
+        pdf.text(`TEAM OPERATIONAL NOTES & SHIFT INSTRUCTIONS (${notes.length})`, 16, notesStartY + 8.5)
 
-        pdf.setTextColor(60, 68, 75)
-        pdf.setFont('helvetica', 'normal')
-        pdf.setFontSize(8)
+        pdf.setTextColor(45, 52, 58)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(9.5)
         notes.forEach((note, nIdx) => {
           const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
-          pdf.text(`• [${note.line === 'All production lines' ? 'Global' : note.line}] ${note.text}${dateStr ? ` (${dateStr})` : ''}`, 16, notesStartY + 15 + nIdx * 8)
+          const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
+          const yPos = notesStartY + 18 + nIdx * 14
+          pdf.setTextColor(185, 106, 53)
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(9)
+          pdf.text(`• ${tag}`, 16, yPos)
+
+          pdf.setTextColor(45, 52, 58)
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(9.5)
+          const textOffset = 16 + pdf.getTextWidth(`• ${tag} `)
+          pdf.text(`${note.text}`, textOffset, yPos)
+
+          if (dateStr) {
+            pdf.setTextColor(125, 133, 140)
+            pdf.setFontSize(8)
+            pdf.text(`(${dateStr})`, 250, yPos)
+          }
         })
       }
     }
@@ -736,9 +769,9 @@ function App() {
             error={timelineError}
             fileName={timelineFileName}
             onUpload={handleTimelineUpload}
-            onExport={(plans, line, notes) => {
+            onExport={(plans, line, notes, shutdownDate) => {
               setCriticalReportPlans(plans)
-              exportPlanDashboardPdf({ plans, line, notes })
+              exportPlanDashboardPdf({ plans, line, notes, shutdownDate })
             }}
           />
         )}
