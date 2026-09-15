@@ -1049,7 +1049,7 @@ function PriorityPortal() {
           <span>Write naturally — the assistant extracts action items, priority, and estimates.</span>
         </div>
         <textarea
-          className="notes-textarea"
+          className="notes-textarea priority-dump-textarea"
           rows={4}
           value={dump}
           onChange={(event) => setDump(event.target.value)}
