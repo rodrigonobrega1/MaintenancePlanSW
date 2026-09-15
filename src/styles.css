@@ -152,6 +152,19 @@
 .report-summary-box strong { color: #323a41; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .text-green { color: #2e7d4a !important; }
 .text-orange { color: #d9823b !important; }
+
+/* Priority Portal */
+.priority-portal-page .plan-source-strip .file-icon { background: #6f6ac9; }
+.priority-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 14px; }
+.priority-tabs button { border: 1px solid #e0e3e6; border-radius: 6px; padding: 7px 12px; background: #fff; color: #69737b; font-size: 11.5px; font-weight: 600; transition: .15s ease; }
+.priority-tabs button:hover { border-color: #d9823b; color: #b96a2f; }
+.priority-tabs button.active { background: #d9823b; border-color: #d9823b; color: #fff; }
+.priority-task-cards { margin-bottom: 6px; }
+.priority-task-card { display: flex; flex-direction: column; }
+.priority-task-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #eef0f1; }
+.repeat-tag { color: #8a9299; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+.priority-task-actions { display: flex; align-items: center; gap: 6px; }
+.priority-task-actions .note-small-btn { height: 28px; padding: 0 10px; font-size: 10.5px; }
 .spin { animation: report-spin .8s linear infinite; }
 @keyframes report-spin { to { transform: rotate(360deg); } }
 @media print {
