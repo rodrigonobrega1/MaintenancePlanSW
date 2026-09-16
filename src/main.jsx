@@ -87,69 +87,172 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line }) {
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-  const colors = { Critical: [198, 91, 83], Overdue: [216, 137, 56], Normal: [101, 143, 116] }
+  const palette = { orange: [217, 130, 59], red: [189, 103, 92], green: [46, 125, 74], blue: [77, 127, 209], graphite: [37, 40, 45] }
+  const severityColors = { Critical: palette.red, Overdue: palette.orange, Normal: palette.green }
+  const rowAccents = [palette.orange, palette.blue, palette.green, palette.red, palette.graphite]
   const formatDuration = (value) => value || 'Full Day'
+  const parseHours = (value) => { const match = String(value || '').match(/(\d+(\.\d+)?)/); return match ? parseFloat(match[1]) : 8 }
+
+  const weekStart = getMonday(new Date())
+  const weekDates = days.map((_, index) => addDays(weekStart, index))
+  const weekLabel = `CW${Math.ceil((((weekStart - new Date(weekStart.getFullYear(), 0, 1)) / 86400000) + 1) / 7)} (${weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${weekDates[6].getFullYear()})`
+
   const drawHeader = (title, subtitle) => {
-    pdf.setTextColor(37, 40, 45); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(18); pdf.text(title, 12, 14)
-    pdf.setTextColor(185, 106, 53); pdf.setFontSize(8); pdf.text(`SELECTED LINES: ${line.toUpperCase()}`, 12, 20)
-    pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.text(`ISSUED: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, 232, 20)
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(17); pdf.text(title, 12, 14)
+    pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(subtitle, 12, 20)
+    pdf.setTextColor(140, 146, 153); pdf.text(`ISSUED: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, 250, 14)
     pdf.setDrawColor(220, 224, 228); pdf.setLineWidth(.6); pdf.line(12, 23, pageWidth - 12, 23)
-    pdf.setFontSize(8); pdf.setTextColor(110, 118, 125); pdf.text(subtitle, 12, 28)
   }
   const drawFooter = () => { pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`Maintenance Planning · Weekly Maintenance Report · Page ${pdf.getNumberOfPages()}`, 12, 203) }
 
-  drawHeader('Weekly Maintenance Report', 'Shutdown allocation and critical maintenance activities')
-  pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.text('Weekly shutdown schedule', 12, 39)
-  const gridX = 48; const gridY = 48; const dayWidth = 31.5; const rowHeight = 13
-  pdf.setFillColor(239, 241, 244); pdf.rect(gridX, gridY, dayWidth * 7, 9, 'F')
-  pdf.setFontSize(7); pdf.setTextColor(70, 78, 85); days.forEach((day, index) => pdf.text(day.slice(0, 3), gridX + index * dayWidth + 11, gridY + 6))
+  // --- PAGE 1: Weekly shutdown schedule (Gantt) ---
+  drawHeader('Weekly Maintenance Planning Report', `Plant Operational Shutdown Schedule & Line Priorities — ${weekLabel}`)
+
+  const allSelectedPlans = allocations.flatMap((allocation) => plans.filter((plan) => plan.machine === allocation.machine))
+  const totalHours = allocations.reduce((sum, allocation) => sum + parseHours(allocation.duration), 0)
+  const criticalCount = allSelectedPlans.filter((plan) => plan.criticality === 'Critical').length
+  const overdueTotal = allSelectedPlans.filter((plan) => plan.daysOverdue > 0).length
+  const complianceRate = allSelectedPlans.length ? Math.round(((allSelectedPlans.length - overdueTotal) / allSelectedPlans.length) * 100) : 100
+  const readiness = allSelectedPlans.length ? Math.round(((allSelectedPlans.length - criticalCount) / allSelectedPlans.length) * 100) : 100
+
+  const kpis = [
+    { label: 'PLANNED SHUTDOWN HOURS', value: `${totalHours.toFixed(1)} Hours`, color: palette.orange },
+    { label: 'PPM COMPLIANCE RATE', value: `${complianceRate}%`, color: palette.blue },
+    { label: 'CRITICAL OVERDUE PLANS', value: `${criticalCount} Tasks`, color: palette.red },
+    { label: 'EXECUTION READINESS', value: `${readiness}% Ready`, color: palette.green },
+  ]
+  const kpiGap = 6; const kpiWidth = (273 - kpiGap * 3) / 4
+  kpis.forEach((kpi, index) => {
+    const x = 12 + index * (kpiWidth + kpiGap)
+    pdf.setFillColor(250, 251, 252); pdf.setDrawColor(228, 231, 234); pdf.setLineWidth(.4); pdf.roundedRect(x, 30, kpiWidth, 21, 1.5, 1.5, 'FD')
+    pdf.setFillColor(...kpi.color); pdf.rect(x, 30, 1.3, 21, 'F')
+    pdf.setTextColor(130, 137, 143); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.3); pdf.text(kpi.label, x + 6, 37)
+    pdf.setTextColor(...palette.graphite); pdf.setFontSize(13); pdf.text(kpi.value, x + 6, 47)
+  })
+
+  const phases = [
+    { label: '1. Pre-Shutdown Planning & Kitting', color: palette.orange },
+    { label: '2. Line Shutdown & Mechanical PPM', color: palette.graphite },
+    { label: '3. Testing, Calibration & Handover', color: palette.blue },
+  ]
+  const phaseY = 57; const phaseHeight = 8; const phaseGap = 4; const phaseWidth = (273 - phaseGap * 2) / 3
+  let phaseX = 12
+  phases.forEach((phase) => {
+    pdf.setFillColor(...phase.color)
+    pdf.rect(phaseX, phaseY, phaseWidth - 4, phaseHeight, 'F')
+    pdf.triangle(phaseX + phaseWidth - 4, phaseY, phaseX + phaseWidth, phaseY + phaseHeight / 2, phaseX + phaseWidth - 4, phaseY + phaseHeight, 'F')
+    pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.text(phase.label, phaseX + 4, phaseY + 5.4)
+    phaseX += phaseWidth
+  })
+
+  const gridY = 71; const gridX = 62; const dayWidth = (285 - gridX) / 7; const rowHeight = 13
+  pdf.setFillColor(...palette.graphite); pdf.rect(12, gridY, 273, 9, 'F')
+  pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6)
+  pdf.text('MACHINE / PRODUCTION LINE', 15, gridY + 6)
+  pdf.text('SHUTDOWN WINDOW', 195 < gridX ? 195 : gridX - 46, gridY + 6)
+  days.forEach((day, index) => {
+    const x = gridX + index * dayWidth
+    pdf.text(`${day.slice(0, 3).toUpperCase()} ${weekDates[index].getDate()}`, x + dayWidth / 2 - 9, gridY + 6)
+  })
+
   allocations.forEach((allocation, rowIndex) => {
     const y = gridY + 9 + rowIndex * rowHeight
-    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text(allocation.machine.slice(0, 20), 12, y + 8)
-    pdf.setDrawColor(235, 238, 240); pdf.line(gridX, y + rowHeight, gridX + dayWidth * 7, y + rowHeight)
+    const accent = rowAccents[rowIndex % rowAccents.length]
+    if (rowIndex % 2 === 1) { pdf.setFillColor(248, 249, 250); pdf.rect(12, y, 273, rowHeight, 'F') }
+    pdf.setFillColor(...accent); pdf.rect(12, y, 1.3, rowHeight, 'F')
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text(allocation.machine.slice(0, 28), 16, y + 6)
+    pdf.setTextColor(...accent); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6)
+    pdf.text(`${allocation.day} · ${formatDuration(allocation.duration)}`.slice(0, 30), 16, y + 10.5)
+    pdf.setDrawColor(235, 238, 240); pdf.line(12, y + rowHeight, 285, y + rowHeight)
     const dayIndex = days.indexOf(allocation.day)
     if (dayIndex >= 0) {
-      pdf.setFillColor(217, 130, 59); pdf.roundedRect(gridX + dayIndex * dayWidth + 2, y + 2, dayWidth - 4, 8, 1.5, 1.5, 'F')
-      pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.text(formatDuration(allocation.duration).slice(0, 17), gridX + dayIndex * dayWidth + 5, y + 7)
+      const badgeX = gridX + dayIndex * dayWidth + 2
+      pdf.setFillColor(...accent); pdf.roundedRect(badgeX, y + 2.5, dayWidth - 4, rowHeight - 5, 1.2, 1.2, 'F')
+      pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.4); pdf.text(formatDuration(allocation.duration).slice(0, 15), badgeX + 2, y + rowHeight / 2 + 1)
     }
   })
+  const gridBottom = gridY + 9 + allocations.length * rowHeight
+  pdf.setDrawColor(225, 228, 231); pdf.setLineWidth(.4); pdf.rect(12, gridY, 273, gridBottom - gridY, 'S')
+  pdf.line(gridX, gridY, gridX, gridBottom)
+  for (let dayLine = 1; dayLine < 7; dayLine += 1) { const x = gridX + dayLine * dayWidth; pdf.line(x, gridY, x, gridBottom) }
+
+  const noteY = Math.min(gridBottom + 8, 165)
+  pdf.setFillColor(249, 250, 251); pdf.setDrawColor(225, 228, 231); pdf.setLineWidth(.4); pdf.roundedRect(12, noteY, 273, 28, 2, 2, 'FD')
+  pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.5); pdf.text('Shutdown Operational Guidelines & Protocol', 16, noteY + 7)
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.6); pdf.setTextColor(95, 102, 109)
+  const guidelines = [
+    '1. Kitting Pre-requisite: All replacement spare parts, specialized tooling, and lubricants must be pre-staged at line side at least 2 hours prior to line stop.',
+    '2. Lockout-Tagout (LOTO): Line supervisors must verify total electrical, pneumatic, and hydraulic isolation prior to technician permit sign-off.',
+    '3. Contractor Alignment: External technicians must complete plant safety induction and present valid certification before work commencement.',
+  ]
+  guidelines.forEach((guideline, index) => pdf.text(guideline, 16, noteY + 13 + index * 5.6, { maxWidth: 265 }))
   drawFooter()
+
+  // --- Line-by-line critical breakdown pages ---
+  const drawCriticalityDonut = (centerX, centerY, radius, distribution, total) => {
+    const order = ['Critical', 'Overdue', 'Normal']
+    let cursorAngle = -90
+    pdf.setLineWidth(5)
+    order.forEach((label) => {
+      const count = distribution[label]
+      if (!count) return
+      const sweep = (count / total) * 360
+      const steps = Math.max(1, Math.round(sweep / 5))
+      for (let step = 0; step < steps; step += 1) {
+        const a0 = (cursorAngle + (sweep * step) / steps) * Math.PI / 180
+        const a1 = (cursorAngle + (sweep * (step + 1)) / steps) * Math.PI / 180
+        pdf.setDrawColor(...severityColors[label])
+        pdf.line(centerX + Math.cos(a0) * radius, centerY + Math.sin(a0) * radius, centerX + Math.cos(a1) * radius, centerY + Math.sin(a1) * radius)
+      }
+      cursorAngle += sweep
+    })
+    pdf.setLineWidth(.2)
+    const centerLabel = String(distribution.Critical)
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text(centerLabel, centerX - pdf.getTextWidth(centerLabel) / 2, centerY + 1.5)
+    pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(5); pdf.text('CRITICAL', centerX - pdf.getTextWidth('CRITICAL') / 2, centerY + 6)
+  }
 
   allocations.forEach((allocation, index) => {
     if (index % 2 === 0) pdf.addPage()
     const blockIndex = index % 2
-    const top = blockIndex === 0 ? 35 : 128
+    const top = blockIndex === 0 ? 34 : 127
     const summary = getTopCriticalTasksPerLine(plans, allocation.machine)
     const total = summary.linePlans.length || 1
-    drawHeader(`Line ${allocation.machine} · Weekly Breakdown`, `${allocation.day} · Duration: ${formatDuration(allocation.duration)} · Top 5 critical activities`)
-    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.text(`LINE / MACHINE: ${allocation.machine}`, 12, top)
-    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(90, 98, 105); pdf.text(`Scheduled: ${allocation.day} · Duration: ${formatDuration(allocation.duration)}`, 12, top + 7)
-    pdf.text(`Total overdue: ${summary.linePlans.filter((plan) => plan.daysOverdue > 0).length} · Critical: ${summary.distribution.Critical} · Backlog days: ${summary.linePlans.reduce((sum, plan) => sum + plan.daysOverdue, 0)}`, 12, top + 13)
-    let cursor = top + 25
-    const centerX = 260; const centerY = top + 9; const radius = 12; let startAngle = -90
-    Object.entries(summary.distribution).forEach(([label, count]) => {
-      if (!count) return
-      const angle = count / total * 360
-      const steps = Math.max(1, Math.ceil(angle / 12))
-      pdf.setFillColor(...colors[label])
-      for (let step = 0; step < steps; step += 1) {
-        const angleStart = (startAngle + (angle * step) / steps) * Math.PI / 180
-        const angleEnd = (startAngle + (angle * (step + 1)) / steps) * Math.PI / 180
-        const x1 = centerX + Math.cos(angleStart) * radius
-        const y1 = centerY + Math.sin(angleStart) * radius
-        const x2 = centerX + Math.cos(angleEnd) * radius
-        const y2 = centerY + Math.sin(angleEnd) * radius
-        pdf.triangle(centerX, centerY, x1, y1, x2, y2, 'F')
-      }
-      startAngle += angle
+    const backlogDays = summary.linePlans.reduce((sum, plan) => sum + plan.daysOverdue, 0)
+    drawHeader(`LINE ${allocation.machine} · Critical Maintenance Breakdown`, `Scheduled ${allocation.day} · Duration ${formatDuration(allocation.duration)} · Top 5 critical activities`)
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text(`LINE / MACHINE: ${allocation.machine}`, 12, top)
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.6); pdf.setTextColor(90, 98, 105)
+    pdf.text(`Total overdue: ${overdueTotal >= 0 ? summary.linePlans.filter((plan) => plan.daysOverdue > 0).length : 0}  ·  Critical: ${summary.distribution.Critical}  ·  Backlog days: ${backlogDays}`, 12, top + 6.5)
+
+    const centerX = 262; const centerY = top + 3; const radius = 11
+    drawCriticalityDonut(centerX, centerY, radius, summary.distribution, total)
+    pdf.setTextColor(120, 128, 134); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(5.5); pdf.text('CRITICALITY', centerX - pdf.getTextWidth('CRITICALITY') / 2, top - 8)
+    const legendY = top + 17
+    pdf.setFillColor(...severityColors.Critical); pdf.rect(235, legendY - 2.6, 2.6, 2.6, 'F'); pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6); pdf.text(`Critical ${summary.distribution.Critical}`, 239, legendY)
+    pdf.setFillColor(...severityColors.Overdue); pdf.rect(235, legendY + 3.4, 2.6, 2.6, 'F'); pdf.text(`Overdue ${summary.distribution.Overdue}`, 239, legendY + 6)
+    pdf.setFillColor(...severityColors.Normal); pdf.rect(235, legendY + 9.4, 2.6, 2.6, 'F'); pdf.text(`On track ${summary.distribution.Normal}`, 239, legendY + 12)
+
+    const cursor = top + 22
+    pdf.setFillColor(239, 241, 244); pdf.rect(12, cursor, 273, 8, 'F')
+    pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7)
+    pdf.text('Rank', 15, cursor + 5.5); pdf.text('Plan Code / Tag', 30, cursor + 5.5); pdf.text('Activity / Maintenance Task', 65, cursor + 5.5); pdf.text('Frequency', 170, cursor + 5.5); pdf.text('Overdue Status', 205, cursor + 5.5); pdf.text('Severity', 260, cursor + 5.5)
+    summary.topTasks.forEach((plan, taskIndex) => {
+      const y = cursor + 14 + taskIndex * 8
+      const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'
+      pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2, 285, y + 2)
+      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
+      pdf.setTextColor(45, 52, 58); pdf.text(plan.planCode.slice(0, 18), 30, y)
+      pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 52), 65, y)
+      pdf.setFont('helvetica', 'normal'); pdf.text(plan.frequency, 170, y)
+      pdf.setTextColor(...severityColors[severityLabel]); pdf.text(plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : 'On track', 205, y)
+      pdf.setFont('helvetica', 'bold'); pdf.text(severityLabel, 260, y)
     })
-    pdf.setTextColor(80, 88, 95); pdf.setFontSize(6.5); pdf.text('Criticality', 248, top + 24); pdf.setFillColor(...colors.Critical); pdf.rect(248, top + 27, 3, 3, 'F'); pdf.text(`Critical ${summary.distribution.Critical}`, 253, top + 30); pdf.setFillColor(...colors.Overdue); pdf.rect(248, top + 33, 3, 3, 'F'); pdf.text(`Overdue ${summary.distribution.Overdue}`, 253, top + 36)
-    pdf.setFillColor(239, 241, 244); pdf.rect(12, cursor, 273, 8, 'F'); pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.text('Rank', 15, cursor + 5.5); pdf.text('Plan Code / Tag', 30, cursor + 5.5); pdf.text('Activity / Maintenance Task', 65, cursor + 5.5); pdf.text('Frequency', 170, cursor + 5.5); pdf.text('Overdue Status', 205, cursor + 5.5); pdf.text('Severity', 260, cursor + 5.5)
-    summary.topTasks.forEach((plan, taskIndex) => { const y = cursor + 14 + taskIndex * 8; const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'; pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2, 285, y + 2); pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y); pdf.setTextColor(45, 52, 58); pdf.text(plan.planCode.slice(0, 18), 30, y); pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 52), 65, y); pdf.setFont('helvetica', 'normal'); pdf.text(plan.frequency, 170, y); pdf.setTextColor(...colors[severityLabel]); pdf.text(plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : 'On track', 205, y); pdf.setFont('helvetica', 'bold'); pdf.text(severityLabel, 260, y) })
     if (blockIndex === 1 || index === allocations.length - 1) drawFooter()
   })
+
   pdf.save('weekly-maintenance-report.pdf')
 }
+
 
 async function downloadPdf(selector, fileName) {
   const element = document.querySelector(selector)
