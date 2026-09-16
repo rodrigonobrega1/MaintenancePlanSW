@@ -8,7 +8,7 @@ const SYSTEM_PROMPT = `Você é um assistente de produtividade executiva.
 Analise o "brain dump" do usuário e extraia apenas tarefas acionáveis.
 Responda SOMENTE com um JSON estritamente no formato abaixo, sem markdown e sem texto adicional:
 {"novas_tarefas": [{"titulo": "Nome objetivo da tarefa", "prioridade": "P1" | "P2" | "P3", "acao_imediata": "Primeiro passo prático"}]}
-Regras: P1 é urgente/hoje/alto impacto, P2 é médio impacto, P3 é rotina; nunca invente tarefas que não estejam no texto; seja objetivo e conciso.`
+Regras: P1 é urgente/hoje/alto impacto, P2 é médio impacto, P3 é rotina; nunca invente tarefas que não estejam no texto; seja objetivo e conciso; preserve exatamente o idioma original do usuário em titulo e acao_imediata; não traduza nem reescreva o conteúdo para outro idioma.`
 
 // Resolves the OpenRouter key: an explicit override wins, otherwise fall back to the
 // build-time env var. NOTE: on a static host (e.g. GitHub Pages) any VITE_ env var is
@@ -42,7 +42,7 @@ function processarLocalmente(brainDumpTexto) {
     const titulo = (primeiraParte || bloco).trim().slice(0, 120)
     const acao = resto.length
       ? resto.join(':').trim().slice(0, 240)
-      : `Definir o primeiro passo prático para: ${bloco}`.slice(0, 240)
+      : bloco.slice(0, 240)
 
     return {
       titulo: titulo.charAt(0).toUpperCase() + titulo.slice(1),

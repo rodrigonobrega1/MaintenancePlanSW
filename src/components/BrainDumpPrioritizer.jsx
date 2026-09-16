@@ -1,7 +1,7 @@
 // Brain Dump prioritization screen: turns unstructured notes into a P1/P2/P3 task
 // queue, using OpenRouter's free tier for extraction and a deterministic overdue counter.
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, KeyRound, LoaderCircle, Sparkles, Trash2, Zap } from 'lucide-react'
+import { AlertTriangle, Check, KeyRound, LoaderCircle, Pencil, Sparkles, Trash2, X, Zap } from 'lucide-react'
 import { processarPrioridades } from '../services/aiService'
 import { calcularDiasAtraso } from '../utils/dateUtils'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
@@ -124,6 +124,10 @@ export default function BrainDumpPrioritizer() {
   const deletarTarefa = (id) => {
     setTarefas((atual) => atual.filter((tarefa) => tarefa.id !== id))
     if (supabase && session?.user) supabase.from('priority_tasks').delete().eq('id', id).eq('user_id', session.user.id).then()
+  }
+
+  const editarTarefa = (id, changes) => {
+    setTarefas((atual) => atual.map((tarefa) => tarefa.id === id ? { ...tarefa, ...changes } : tarefa))
   }
 
   const handleSalvarApiKey = () => {
@@ -267,7 +271,7 @@ export default function BrainDumpPrioritizer() {
             </div>
             <div className="maintenance-plan-cards priority-task-cards">
               {tarefasCategoria.map((tarefa) => (
-                <TarefaCard key={tarefa.id} tarefa={tarefa} tone={tone} onConcluir={marcarConcluida} onDeletar={deletarTarefa} />
+                <TarefaCard key={tarefa.id} tarefa={tarefa} tone={tone} onConcluir={marcarConcluida} onDeletar={deletarTarefa} onEditar={editarTarefa} />
               ))}
               {!tarefasCategoria.length && <div className="empty-dashboard">Nenhuma tarefa nesta categoria.</div>}
             </div>
@@ -282,7 +286,7 @@ export default function BrainDumpPrioritizer() {
         </div>
         <div className="maintenance-plan-cards priority-task-cards">
           {concluidas.map((tarefa) => (
-            <TarefaCard key={tarefa.id} tarefa={tarefa} tone="green" onReabrir={reabrirTarefa} onDeletar={deletarTarefa} />
+            <TarefaCard key={tarefa.id} tarefa={tarefa} tone="green" onReabrir={reabrirTarefa} onDeletar={deletarTarefa} onEditar={editarTarefa} />
           ))}
           {!concluidas.length && <div className="empty-dashboard">Nenhuma tarefa concluída ainda.</div>}
         </div>
@@ -291,10 +295,27 @@ export default function BrainDumpPrioritizer() {
   )
 }
 
-function TarefaCard({ tarefa, tone, onConcluir, onReabrir, onDeletar }) {
+function TarefaCard({ tarefa, tone, onConcluir, onReabrir, onDeletar, onEditar }) {
+  const [editando, setEditando] = useState(false)
+  const [titulo, setTitulo] = useState(tarefa.titulo)
+  const [acao, setAcao] = useState(tarefa.acao)
+  const [prioridade, setPrioridade] = useState(tarefa.prioridade)
   const concluida = tarefa.status === 'concluido'
   const diasAtraso = concluida ? 0 : calcularDiasAtraso(tarefa.dataCriacao)
-  const stateTone = concluida ? 'on-track' : tone === 'red' ? 'critical' : tone === 'orange' ? 'overdue' : 'due-soon'
+  const stateTone = concluida ? 'on-track' : prioridade === 'P1' ? 'critical' : prioridade === 'P2' ? 'overdue' : 'due-soon'
+
+  const iniciarEdicao = () => {
+    setTitulo(tarefa.titulo)
+    setAcao(tarefa.acao)
+    setPrioridade(tarefa.prioridade)
+    setEditando(true)
+  }
+
+  const salvarEdicao = () => {
+    if (!titulo.trim()) return
+    onEditar(tarefa.id, { titulo: titulo.trim(), acao: acao.trim(), prioridade })
+    setEditando(false)
+  }
 
   return (
     <article className={`maintenance-plan-card priority-task-card card-${stateTone}`}>
@@ -309,14 +330,26 @@ function TarefaCard({ tarefa, tone, onConcluir, onReabrir, onDeletar }) {
         </label>
         <span className={`plan-state state-${stateTone}`}><i />{tarefa.prioridade}</span>
       </div>
-      <h3>{tarefa.titulo}</h3>
-      <p>{tarefa.acao}</p>
+      {editando ? (
+        <div className="priority-task-edit-form">
+          <input value={titulo} onChange={(event) => setTitulo(event.target.value)} aria-label="Task title" />
+          <textarea value={acao} onChange={(event) => setAcao(event.target.value)} rows={3} aria-label="Immediate action" />
+          <label><span>Categoria</span><select value={prioridade} onChange={(event) => setPrioridade(event.target.value)}><option value="P1">P1 - Urgente</option><option value="P2">P2 - Médio impacto</option><option value="P3">P3 - Rotina</option></select></label>
+          <div className="priority-task-edit-actions">
+            <button className="button button-primary note-small-btn" onClick={salvarEdicao}><Check size={13} />Salvar</button>
+            <button className="button button-secondary note-small-btn" onClick={() => setEditando(false)}><X size={13} />Cancelar</button>
+          </div>
+        </div>
+      ) : (
+        <><h3>{tarefa.titulo}</h3><p>{tarefa.acao}</p></>
+      )}
       <div className="plan-card-meta">
         <span><small>Criada em</small><strong>{new Date(tarefa.dataCriacao).toLocaleDateString('pt-BR')}</strong></span>
       </div>
       {diasAtraso > 0 && <div className="delay-badge"><AlertTriangle size={13} />⚠️ {diasAtraso} dia{diasAtraso === 1 ? '' : 's'} em atraso</div>}
       <div className="priority-task-footer no-print">
         <div className="priority-task-actions">
+          {!editando && <button className="icon-button note-action-btn note-edit-btn" onClick={iniciarEdicao} aria-label="Editar tarefa" title="Editar tarefa"><Pencil size={13} /></button>}
           <button className="icon-button note-action-btn note-delete-btn" onClick={() => onDeletar(tarefa.id)} aria-label="Excluir tarefa" title="Excluir tarefa">
             <Trash2 size={13} />
           </button>

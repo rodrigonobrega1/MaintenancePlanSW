@@ -189,6 +189,11 @@
 .priority-auth-form input:focus { border-color: #d9823b; box-shadow: 0 0 0 2px #d9823b18; }
 .auth-message { margin: 9px 0 0; color: #69737b; font-size: 11px; }
 .account-label { max-width: 190px; overflow: hidden; color: #69737b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.priority-task-edit-form { display: grid; gap: 8px; margin: 10px 0; }
+.priority-task-edit-form input, .priority-task-edit-form textarea, .priority-task-edit-form select { width: 100%; border: 1px solid #dce0e3; border-radius: 5px; padding: 8px 9px; background: #fff; color: #2e353c; font: inherit; font-size: 11.5px; outline: none; }
+.priority-task-edit-form input:focus, .priority-task-edit-form textarea:focus, .priority-task-edit-form select:focus { border-color: #d9823b; box-shadow: 0 0 0 2px #d9823b18; }
+.priority-task-edit-form label { display: grid; gap: 4px; color: #7d878e; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.priority-task-edit-actions { display: flex; gap: 7px; }
 .priority-category-section { margin-top: 8px; margin-bottom: 22px; }
 .priority-task-checkbox { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: #525d66; cursor: pointer; }
 .priority-task-checkbox input { width: 15px; height: 15px; accent-color: #2e7d4a; cursor: pointer; }
