@@ -180,26 +180,26 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line }) {
   drawFooter()
 
   // --- Line-by-line critical breakdown pages ---
-  const drawCriticalityBars = (x, y, width, distribution, total) => {
+  const drawCriticalityBars = (labelX, barX, barWidth, y, distribution, total) => {
     const order = ['Critical', 'Overdue', 'Normal']
     const barLabels = { Critical: 'Critical', Overdue: 'Overdue', Normal: 'On track' }
-    const barHeight = 4.4; const rowGap = 6.4
+    const barHeight = 6.4; const rowGap = 11
     order.forEach((label, rowIndex) => {
       const count = distribution[label] || 0
       const rowY = y + rowIndex * rowGap
-      pdf.setTextColor(90, 98, 105); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.4); pdf.text(barLabels[label], x, rowY - 1)
-      pdf.setFillColor(238, 240, 242); pdf.roundedRect(x, rowY, width, barHeight, 1, 1, 'F')
-      const barFill = total ? Math.max(count > 0 ? 3 : 0, (count / total) * width) : 0
-      if (barFill > 0) { pdf.setFillColor(...severityColors[label]); pdf.roundedRect(x, rowY, barFill, barHeight, 1, 1, 'F') }
-      pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6); pdf.text(String(count), x + width + 3, rowY + barHeight - .5)
+      pdf.setTextColor(90, 98, 105); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8)
+      pdf.text(barLabels[label], labelX - pdf.getTextWidth(barLabels[label]), rowY + barHeight - 1.3)
+      pdf.setFillColor(238, 240, 242); pdf.roundedRect(barX, rowY, barWidth, barHeight, 1.4, 1.4, 'F')
+      const barFill = total ? Math.max(count > 0 ? 4 : 0, (count / total) * barWidth) : 0
+      if (barFill > 0) { pdf.setFillColor(...severityColors[label]); pdf.roundedRect(barX, rowY, barFill, barHeight, 1.4, 1.4, 'F') }
+      pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text(String(count), barX + barWidth + 4, rowY + barHeight - 1.3)
     })
   }
 
   allocations.forEach((allocation, index) => {
     pdf.addPage()
-    const summary = getTopCriticalTasksPerLine(plans, allocation.machine)
+    const summary = getTopCriticalTasksPerLine(plans, allocation.machine, 10)
     const total = summary.linePlans.length || 1
-    const backlogDays = summary.linePlans.reduce((sum, plan) => sum + plan.daysOverdue, 0)
 
     pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.6)
     pdf.text(`ISSUED: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, 250, 15)
@@ -209,22 +209,22 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line }) {
     pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(19); pdf.text(`LINE / MACHINE: ${allocation.machine}`, 12, top)
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(90, 98, 105)
     pdf.text(`Scheduled ${allocation.day} · Duration ${formatDuration(allocation.duration)}`, 12, top + 9)
-    pdf.text(`Total overdue: ${summary.linePlans.filter((plan) => plan.daysOverdue > 0).length}  ·  Critical: ${summary.distribution.Critical}  ·  Backlog days: ${backlogDays}`, 12, top + 17)
+    pdf.text(`Total overdue: ${summary.linePlans.filter((plan) => plan.daysOverdue > 0).length}  ·  Critical: ${summary.distribution.Critical}`, 12, top + 17)
 
-    pdf.setTextColor(120, 128, 134); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6); pdf.text('CRITICALITY DISTRIBUTION', 190, top - 8)
-    drawCriticalityBars(190, top - 1, 68, summary.distribution, total)
+    pdf.setTextColor(120, 128, 134); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.text('CRITICALITY DISTRIBUTION', 118, top - 9)
+    drawCriticalityBars(150, 155, 110, top - 1, summary.distribution, total)
 
-    const cursor = top + 32
-    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11.5); pdf.text('TOP 5 CRITICAL PLANS', 12, cursor - 6)
+    const cursor = top + 40
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11.5); pdf.text('TOP 10 CRITICAL PLANS', 12, cursor - 6)
 
     pdf.setFillColor(239, 241, 244); pdf.rect(12, cursor, 273, 8, 'F')
     pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7)
     pdf.text('Rank', 15, cursor + 5.5); pdf.text('Plan Code / Tag', 30, cursor + 5.5); pdf.text('Activity / Maintenance Task', 65, cursor + 5.5); pdf.text('Frequency', 170, cursor + 5.5); pdf.text('Overdue Status', 205, cursor + 5.5); pdf.text('Severity', 260, cursor + 5.5)
     summary.topTasks.forEach((plan, taskIndex) => {
-      const y = cursor + 16 + taskIndex * 10
+      const y = cursor + 15 + taskIndex * 9
       const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'
-      pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 3, 285, y + 3)
-      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
+      pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2.6, 285, y + 2.6)
+      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.6); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
       pdf.setTextColor(45, 52, 58); pdf.text(plan.planCode.slice(0, 18), 30, y)
       pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 52), 65, y)
       pdf.setFont('helvetica', 'normal'); pdf.text(plan.frequency, 170, y)
