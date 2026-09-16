@@ -1174,7 +1174,8 @@ function RichTextEditor({ value, onChange, placeholder }) {
 }
 
 function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, onExport }) {
-  const [lineFilter, setLineFilter] = useState('All production lines')
+  const [selectedMachines, setSelectedMachines] = useState([])
+  const [machineFilterOpen, setMachineFilterOpen] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
   const [teamNotes, setTeamNotes] = useState(() => {
     try {
@@ -1203,12 +1204,17 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   }, [teamNotes])
 
   const machines = useMemo(() => [...new Set(plans.map((plan) => plan.machine))].sort(), [plans])
-  const visiblePlans = useMemo(() => plans.filter((plan) => lineFilter === 'All production lines' || plan.machine === lineFilter), [plans, lineFilter])
+  const lineFilter = selectedMachines.length ? selectedMachines.join(', ') : 'All production lines'
+  const visiblePlans = useMemo(() => plans.filter((plan) => !selectedMachines.length || selectedMachines.includes(plan.machine)), [plans, selectedMachines])
   const prioritizedPlans = useMemo(() => [...visiblePlans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0)), [visiblePlans])
 
   const filteredNotes = useMemo(() => {
-    return teamNotes.filter((n) => lineFilter === 'All production lines' || n.line === 'All production lines' || n.line === lineFilter)
-  }, [teamNotes, lineFilter])
+    return teamNotes.filter((n) => !selectedMachines.length || n.line === 'All production lines' || selectedMachines.includes(n.line))
+  }, [teamNotes, selectedMachines])
+
+  const toggleMachine = (machine) => {
+    setSelectedMachines((current) => current.includes(machine) ? current.filter((item) => item !== machine) : [...current, machine])
+  }
 
   const handleAddNote = (e) => {
     if (e) e.preventDefault()
@@ -1217,7 +1223,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
     const note = {
       id: `note-${Date.now()}`,
       text: sanitizeNoteHtml(newNoteText),
-      line: newNoteLine === 'Current line' ? lineFilter : 'All production lines',
+      line: newNoteLine === 'Current line' && selectedMachines.length === 1 ? selectedMachines[0] : 'All production lines',
       createdAt: new Date().toISOString(),
     }
     setTeamNotes((prev) => [note, ...prev])
@@ -1277,14 +1283,27 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
       </div>
       <div className="plan-filter-controls">
         <label>
-          <span>Production line</span>
-          <div className="select-wrap">
+          <span>Production lines / machines</span>
+          <div className="multi-machine-filter">
             <Filter size={15} />
-            <select value={lineFilter} onChange={(event) => setLineFilter(event.target.value)}>
-              <option>All production lines</option>
-              {machines.map((machine) => <option key={machine}>{machine}</option>)}
-            </select>
-            <ChevronDown size={14} />
+            <button type="button" className="multi-machine-trigger" onClick={() => setMachineFilterOpen((open) => !open)}>
+              <span>{selectedMachines.length ? `${selectedMachines.length} selected: ${selectedMachines.join(', ')}` : 'All production lines / machines'}</span>
+              <ChevronDown size={14} />
+            </button>
+            {machineFilterOpen && (
+              <div className="multi-machine-menu">
+                <label className="multi-machine-option select-all-option">
+                  <input type="checkbox" checked={!selectedMachines.length} onChange={() => setSelectedMachines([])} />
+                  <span>All production lines / machines</span>
+                </label>
+                {machines.map((machine) => (
+                  <label key={machine} className="multi-machine-option">
+                    <input type="checkbox" checked={selectedMachines.includes(machine)} onChange={() => toggleMachine(machine)} />
+                    <span>{machine}</span>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         </label>
         <div className="filter-result">
