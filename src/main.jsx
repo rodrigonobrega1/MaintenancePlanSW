@@ -1058,7 +1058,8 @@ function escapeHtml(value) {
 
 function noteHtml(value) {
   if (!value) return ''
-  if (/<[a-z][\s\S]*>/i.test(value)) return value
+  if (/<(?:br|div|p|ul|ol|li|strong|b|em|i|u|blockquote)(?:\s|>)/i.test(value)) return value
+  if (/&(?:amp|lt|gt|quot|#39|#\d+);/i.test(value)) return value
   return escapeHtml(value).replace(/\n/g, '<br>')
 }
 
@@ -1103,9 +1104,12 @@ function RichTextToolbarButton({ label, icon: Icon, command, value }) {
 
 function RichTextEditor({ value, onChange, placeholder }) {
   const editorRef = useRef(null)
+  const isEditingRef = useRef(false)
 
   useEffect(() => {
-    if (editorRef.current && editorRef.current.innerHTML !== noteHtml(value)) editorRef.current.innerHTML = noteHtml(value)
+    if (!editorRef.current || isEditingRef.current) return
+    const nextHtml = noteHtml(value)
+    if (editorRef.current.innerHTML !== nextHtml) editorRef.current.innerHTML = nextHtml
   }, [value])
 
   return (
@@ -1125,6 +1129,11 @@ function RichTextEditor({ value, onChange, placeholder }) {
         role="textbox"
         aria-multiline="true"
         data-placeholder={placeholder}
+        onFocus={() => { isEditingRef.current = true }}
+        onBlur={(event) => {
+          isEditingRef.current = false
+          onChange(event.currentTarget.innerHTML)
+        }}
         onInput={(event) => onChange(event.currentTarget.innerHTML)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) event.preventDefault()
