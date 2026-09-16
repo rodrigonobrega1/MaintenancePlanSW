@@ -186,9 +186,6 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
   const ordered = [...plans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
-  const cardWidth = 87
-  const cardHeight = 38
-  const cardGap = 6
   const pageToken = '{total_pages_count_string}'
 
   const statusColor = (plan) => {
@@ -235,103 +232,7 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
     pdf.text(`Page ${page} of ${pageToken}`, pageWidth - 32, 203)
   }
 
-  // Renders the notes as a plain list (no card/box), with unrestricted wrapped text.
-  // Pass dryRun to measure the resulting height without drawing anything.
-  const renderNotesList = (startY, maxWidth, { dryRun = false } = {}) => {
-    let y = startY
-
-    if (!dryRun) {
-      pdf.setTextColor(185, 106, 53)
-      pdf.setFont('helvetica', 'bold')
-      pdf.setFontSize(11)
-      pdf.text('IMPORTANT NOTES', 12, y)
-      pdf.setDrawColor(217, 130, 59)
-      pdf.setLineWidth(0.5)
-      pdf.line(12, y + 2.5, 12 + maxWidth, y + 2.5)
-    }
-    y += 9
-
-    notes.forEach((note) => {
-      const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
-      const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
-      const fullText = String(note.text).split('\n').filter(Boolean).join('  ')
-
-      pdf.setFont('helvetica', 'bold')
-      pdf.setFontSize(9.5)
-      const tagWidth = pdf.getTextWidth(`${tag}  `)
-      pdf.setFont('helvetica', 'normal')
-      const lines = pdf.splitTextToSize(fullText, maxWidth - tagWidth - 4)
-
-      if (!dryRun) {
-        pdf.setFont('helvetica', 'bold')
-        pdf.setTextColor(185, 106, 53)
-        pdf.text(`• ${tag}`, 12, y)
-        pdf.setFont('helvetica', 'normal')
-        pdf.setTextColor(45, 52, 58)
-        pdf.text(lines[0] || '', 12 + tagWidth + 3, y)
-        if (dateStr) {
-          pdf.setTextColor(150, 157, 163)
-          pdf.setFontSize(7.5)
-          pdf.text(dateStr, 12 + maxWidth - pdf.getTextWidth(dateStr), y)
-          pdf.setFontSize(9.5)
-        }
-      }
-
-      lines.slice(1).forEach((lineText) => {
-        y += 5.2
-        if (!dryRun) pdf.text(lineText, 12 + tagWidth + 3, y)
-      })
-
-      y += 8
-    })
-
-    return y
-  }
-
-  // --- PAGE 1: Top Priority Cards ---
-  const topCards = ordered.slice(0, 12)
-  drawHeader(
-    'Top Priority Maintenance Plans',
-    `Top ${topCards.length} prioritized plans from active queue · Complete list of all ${ordered.length} plans continues on next pages`
-  )
-
-  topCards.forEach((plan, index) => {
-    const column = index % 3
-    const row = Math.floor(index / 3)
-    const x = 12 + column * (cardWidth + cardGap)
-    const y = 31 + row * (cardHeight + 3)
-    const color = statusColor(plan)
-    const isOverdue = plan.daysOverdue > 0
-
-    pdf.setFillColor(252, 252, 251)
-    pdf.setDrawColor(...color)
-    pdf.setLineWidth(1)
-    pdf.roundedRect(x, y, cardWidth, cardHeight, 2, 2, 'FD')
-
-    pdf.setTextColor(90, 98, 105)
-    pdf.setFont('helvetica', 'bold')
-    pdf.setFontSize(9)
-    pdf.text(plan.frequency, x + 6, y + 8)
-
-    pdf.setTextColor(...color)
-    pdf.setFontSize(8)
-    const badgeText = isOverdue ? `${plan.daysOverdue}d overdue` : plan.criticality === 'Due soon' ? 'Due soon' : 'On track'
-    pdf.text(badgeText, x + (cardWidth - 6 - pdf.getTextWidth(badgeText)), y + 8)
-
-    pdf.setTextColor(47, 55, 61)
-    pdf.setFontSize(10)
-    pdf.text(plan.activity.slice(0, 31), x + 6, y + 17)
-
-    pdf.setTextColor(125, 133, 140)
-    pdf.setFontSize(8)
-    pdf.text(`${plan.machine} · ${plan.planCode}`.slice(0, 38), x + 6, y + 24)
-    pdf.text(`Last: ${plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed'}`, x + 6, y + 30)
-    pdf.text(`Next: ${plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned'}`, x + 6, y + 35)
-  })
-
-  drawFooter()
-
-  // --- PAGE 2+: Full List of ALL Plans for the Selected Line ---
+  // --- Full List of ALL Plans for the Selected Line ---
   const rowsPerPage = 15
   const totalListPages = Math.ceil(ordered.length / rowsPerPage) || 1
 
@@ -346,7 +247,7 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
   ]
 
   for (let p = 0; p < totalListPages; p++) {
-    pdf.addPage()
+    if (p > 0) pdf.addPage()
     drawHeader(
       'Complete Maintenance Plan Portfolio',
       `Complete list of all ${ordered.length} plans for ${line} · Ordered by delay and criticality (Page ${p + 1} of ${totalListPages})`
@@ -403,23 +304,73 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
       pdf.text(sevLabel, 268, rowY)
     })
 
-    // If on the last page and notes exist, print notes list (fits inline or on a dedicated page)
+    // If on the last page, render notes as a plain wrapped list. Every line is checked
+    // against the bottom margin before drawing, so long notes safely flow onto new pages
+    // instead of ever being cut off or hidden.
     if (p === totalListPages - 1 && notes && notes.length > 0) {
+      const contentWidth = 273
+      const bottomLimit = 198
       const lastRowY = listStart + 13 + pagePlans.length * 8.5
-      const notesStartY = Math.max(lastRowY + 8, 140)
-      const estimatedEndY = renderNotesList(notesStartY, 273, { dryRun: true })
+      let y = Math.max(lastRowY + 8, 140)
+      let isFirstNotesPage = true
 
-      if (estimatedEndY <= 198) {
-        renderNotesList(notesStartY, 273)
-      } else {
-        // Overflow to a dedicated notes page
-        pdf.addPage()
-        drawHeader(
-          'Important Notes',
-          `Operational notes and shift instructions for ${line} · Shutdown: ${shutdownLabel}`
-        )
-        renderNotesList(35, 273)
+      const drawSectionTitle = () => {
+        pdf.setTextColor(185, 106, 53)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(11)
+        pdf.text(isFirstNotesPage ? 'IMPORTANT NOTES' : 'IMPORTANT NOTES (CONTINUED)', 12, y)
+        pdf.setDrawColor(217, 130, 59)
+        pdf.setLineWidth(0.5)
+        pdf.line(12, y + 2.5, 12 + contentWidth, y + 2.5)
+        y += 9
       }
+
+      const ensureSpace = (needed) => {
+        if (y + needed > bottomLimit) {
+          drawFooter()
+          pdf.addPage()
+          drawHeader('Important Notes', `Operational notes and shift instructions for ${line} · Shutdown: ${shutdownLabel}`)
+          y = 35
+          isFirstNotesPage = false
+          drawSectionTitle()
+        }
+      }
+
+      drawSectionTitle()
+
+      notes.forEach((note) => {
+        const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
+        const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
+        const fullText = String(note.text).split('\n').filter(Boolean).join('  ')
+
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(9.5)
+        const bodyLines = pdf.splitTextToSize(fullText, contentWidth - 4)
+
+        ensureSpace(5.5)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(9.5)
+        pdf.setTextColor(185, 106, 53)
+        pdf.text(`• ${tag}`, 12, y)
+        if (dateStr) {
+          pdf.setTextColor(150, 157, 163)
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(7.5)
+          pdf.text(dateStr, 12 + contentWidth - pdf.getTextWidth(dateStr), y)
+        }
+        y += 5.5
+
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(9.5)
+        pdf.setTextColor(45, 52, 58)
+        bodyLines.forEach((lineText) => {
+          ensureSpace(5.2)
+          pdf.text(lineText, 16, y)
+          y += 5.2
+        })
+
+        y += 5
+      })
     }
 
     drawFooter()
