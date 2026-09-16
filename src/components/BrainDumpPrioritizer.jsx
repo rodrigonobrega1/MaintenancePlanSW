@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, KeyRound, LoaderCircle, Sparkles, Trash2, Zap } from 'lucide-react'
 import { processarPrioridades } from '../services/aiService'
 import { calcularDiasAtraso } from '../utils/dateUtils'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 const TASKS_STORAGE_KEY = 'fieldmark-brain-dump-tasks'
 const API_KEY_STORAGE_KEY = 'fieldmark-openrouter-api-key'
@@ -35,10 +36,53 @@ export default function BrainDumpPrioritizer() {
   const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem(API_KEY_STORAGE_KEY) || '' } catch { return '' } })
   const [apiKeyDraft, setApiKeyDraft] = useState('')
   const [showApiKeyPanel, setShowApiKeyPanel] = useState(false)
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(isSupabaseConfigured)
+  const [authMode, setAuthMode] = useState('login')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
+  const [cloudLoaded, setCloudLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!supabase) return undefined
+    let mounted = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (mounted) { setSession(data.session); setAuthLoading(false) }
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    return () => { mounted = false; listener.subscription.unsubscribe() }
+  }, [])
+
+  useEffect(() => {
+    if (!supabase || !session?.user) {
+      setCloudLoaded(false)
+      return
+    }
+    let mounted = true
+    const loadCloudData = async () => {
+      const [{ data: cloudTasks }, { data: settings }] = await Promise.all([
+        supabase.from('priority_tasks').select('*').order('data_criacao', { ascending: false }),
+        supabase.from('priority_settings').select('openrouter_api_key').maybeSingle(),
+      ])
+      if (!mounted) return
+      if (cloudTasks) setTarefas(cloudTasks.map((task) => ({ id: task.id, titulo: task.titulo, prioridade: task.prioridade, acao: task.acao, dataCriacao: task.data_criacao, status: task.status })))
+      if (settings?.openrouter_api_key) setApiKey(settings.openrouter_api_key)
+      setCloudLoaded(true)
+    }
+    loadCloudData()
+    return () => { mounted = false }
+  }, [session])
 
   useEffect(() => {
     try { localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tarefas)) } catch {}
-  }, [tarefas])
+    if (supabase && session?.user && cloudLoaded) {
+      supabase.from('priority_tasks').upsert(tarefas.map((task) => ({
+        id: task.id, user_id: session.user.id, titulo: task.titulo, prioridade: task.prioridade,
+        acao: task.acao, data_criacao: task.dataCriacao, status: task.status,
+      }))).then()
+    }
+  }, [tarefas, session, cloudLoaded])
 
   const pendentes = useMemo(() => tarefas.filter((tarefa) => tarefa.status === 'pendente'), [tarefas])
   const concluidas = useMemo(() => tarefas.filter((tarefa) => tarefa.status === 'concluido'), [tarefas])
@@ -79,12 +123,14 @@ export default function BrainDumpPrioritizer() {
 
   const deletarTarefa = (id) => {
     setTarefas((atual) => atual.filter((tarefa) => tarefa.id !== id))
+    if (supabase && session?.user) supabase.from('priority_tasks').delete().eq('id', id).eq('user_id', session.user.id).then()
   }
 
   const handleSalvarApiKey = () => {
     const trimmed = apiKeyDraft.trim()
     setApiKey(trimmed)
     try { localStorage.setItem(API_KEY_STORAGE_KEY, trimmed) } catch {}
+    if (supabase && session?.user) supabase.from('priority_settings').upsert({ user_id: session.user.id, openrouter_api_key: trimmed, updated_at: new Date().toISOString() }).then()
     setApiKeyDraft('')
     setShowApiKeyPanel(false)
   }
@@ -92,10 +138,34 @@ export default function BrainDumpPrioritizer() {
   const handleRemoverApiKey = () => {
     setApiKey('')
     try { localStorage.removeItem(API_KEY_STORAGE_KEY) } catch {}
+    if (supabase && session?.user) supabase.from('priority_settings').delete().eq('user_id', session.user.id).then()
+  }
+
+  const handleAuth = async (event) => {
+    event.preventDefault()
+    setAuthMessage('')
+    const result = authMode === 'login'
+      ? await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword })
+      : await supabase.auth.signUp({ email: authEmail, password: authPassword })
+    if (result.error) setAuthMessage(result.error.message)
+    else setAuthMessage(authMode === 'login' ? 'Login realizado.' : 'Conta criada. Verifique seu e-mail se a confirmação estiver ativada.')
   }
 
   return (
     <div className="page-wrap plan-dashboard-page priority-portal-page">
+      {!isSupabaseConfigured && <div className="upload-error"><AlertTriangle size={15} />Supabase ainda não foi configurado neste ambiente.</div>}
+      {isSupabaseConfigured && !session && !authLoading && (
+        <section className="plan-filter-panel no-print priority-auth-panel">
+          <div className="filter-title"><KeyRound size={16} /><strong>Access your Priority Portal</strong><span>Sign in to keep tasks and settings synchronized across devices.</span></div>
+          <form className="priority-auth-form" onSubmit={handleAuth}>
+            <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="Email" required />
+            <input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Password" minLength={6} required />
+            <button className="button button-primary" type="submit">{authMode === 'login' ? 'Sign in' : 'Create account'}</button>
+            <button className="button button-secondary" type="button" onClick={() => setAuthMode((mode) => mode === 'login' ? 'signup' : 'login')}>{authMode === 'login' ? 'Create account' : 'Back to sign in'}</button>
+          </form>
+          {authMessage && <p className="auth-message">{authMessage}</p>}
+        </section>
+      )}
       <div className="plan-dashboard-head">
         <div>
           <div className="eyebrow">Priorização diária com IA</div>
@@ -107,6 +177,7 @@ export default function BrainDumpPrioritizer() {
             <KeyRound size={15} />{apiKey ? 'Chave OpenRouter configurada' : 'Configurar chave OpenRouter'}
           </button>
         </div>
+        {session && <div className="intro-actions no-print"><span className="account-label">{session.user.email}</span><button className="button button-secondary" onClick={() => supabase.auth.signOut()}>Sign out</button></div>}
       </div>
 
       <div className="plan-source-strip">
