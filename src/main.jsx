@@ -83,7 +83,7 @@ function getTopCriticalTasksPerLine(plans, machine, limit = 5) {
   return { linePlans, topTasks, distribution }
 }
 
-function exportWeeklyMaintenanceReport({ plans, allocations, line }) {
+function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: selectedWeekStart }) {
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -93,7 +93,7 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line }) {
   const formatDuration = (value) => value || 'Full Day'
   const parseHours = (value) => { const match = String(value || '').match(/(\d+(\.\d+)?)/); return match ? parseFloat(match[1]) : 8 }
 
-  const weekStart = getMonday(new Date())
+  const weekStart = getMonday(selectedWeekStart ? new Date(selectedWeekStart) : new Date())
   const weekDates = days.map((_, index) => addDays(weekStart, index))
   const weekLabel = `CW${Math.ceil((((weekStart - new Date(weekStart.getFullYear(), 0, 1)) / 86400000) + 1) / 7)} (${weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${weekDates[6].getFullYear()})`
 
@@ -1650,9 +1650,9 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
       <WeeklyReportModal
         lines={selectedMachines}
         onClose={() => setShowWeeklyReportModal(false)}
-        onGenerate={(allocations) => {
+        onGenerate={(allocations, weekStart) => {
           setShowWeeklyReportModal(false)
-          exportWeeklyMaintenanceReport({ plans: visiblePlans, allocations, line: lineFilter })
+          exportWeeklyMaintenanceReport({ plans: visiblePlans, allocations, line: lineFilter, weekStart })
         }}
       />
     )}
@@ -2451,6 +2451,7 @@ function ReportShutdownModal({ line, plansCount, onClose, onGenerate }) {
 function WeeklyReportModal({ lines, onClose, onGenerate }) {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
   const [allocations, setAllocations] = useState(() => lines.map((machine, index) => ({ machine, day: days[index % days.length], duration: 'Full Day' })))
+  const [weekStart, setWeekStart] = useState(() => getMonday(new Date()))
   const updateAllocation = (machine, field, value) => setAllocations((current) => current.map((allocation) => allocation.machine === machine ? { ...allocation, [field]: value } : allocation))
 
   return (
@@ -2464,6 +2465,16 @@ function WeeklyReportModal({ lines, onClose, onGenerate }) {
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close weekly report"><X size={19} /></button>
         </div>
+        <div className="weekly-week-picker">
+          <label>
+            <span>Report week</span>
+            <div className="date-input-wrap">
+              <CalendarDays size={15} />
+              <input type="date" value={formatDateKey(weekStart)} onChange={(event) => event.target.value && setWeekStart(getMonday(new Date(`${event.target.value}T00:00:00`)))} />
+            </div>
+          </label>
+          <span className="weekly-week-range">{formatWeekRange(weekStart)}</span>
+        </div>
         <div className="weekly-allocation-list">
           {allocations.map((allocation) => (
             <div className="weekly-allocation-row" key={allocation.machine}>
@@ -2475,7 +2486,7 @@ function WeeklyReportModal({ lines, onClose, onGenerate }) {
         </div>
         <div className="modal-actions">
           <button type="button" className="button button-secondary" onClick={onClose}>Cancel</button>
-          <button type="button" className="button button-primary" onClick={() => onGenerate(allocations)}><FileDown size={15} />Confirm &amp; Generate Weekly Report</button>
+          <button type="button" className="button button-primary" onClick={() => onGenerate(allocations, weekStart)}><FileDown size={15} />Confirm &amp; Generate Weekly Report</button>
         </div>
       </div>
     </div>
