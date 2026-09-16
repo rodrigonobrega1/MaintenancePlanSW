@@ -196,36 +196,42 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line }) {
   }
 
   allocations.forEach((allocation, index) => {
-    if (index % 2 === 0) pdf.addPage()
-    const blockIndex = index % 2
-    const top = blockIndex === 0 ? 38 : 130
+    pdf.addPage()
     const summary = getTopCriticalTasksPerLine(plans, allocation.machine)
     const total = summary.linePlans.length || 1
     const backlogDays = summary.linePlans.reduce((sum, plan) => sum + plan.daysOverdue, 0)
-    drawHeader(`LINE ${allocation.machine} · Critical Maintenance Breakdown`, `Scheduled ${allocation.day} · Duration ${formatDuration(allocation.duration)} · Top 5 critical activities`)
-    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text(`LINE / MACHINE: ${allocation.machine}`, 12, top)
-    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.4); pdf.setTextColor(90, 98, 105)
-    pdf.text(`Total overdue: ${summary.linePlans.filter((plan) => plan.daysOverdue > 0).length}  ·  Critical: ${summary.distribution.Critical}  ·  Backlog days: ${backlogDays}`, 12, top + 6.5)
 
-    pdf.setTextColor(120, 128, 134); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6); pdf.text('CRITICALITY DISTRIBUTION', 190, top - 3)
-    drawCriticalityBars(190, top + 3, 68, summary.distribution, total)
+    pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.6)
+    pdf.text(`ISSUED: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, 250, 15)
+    pdf.setDrawColor(220, 224, 228); pdf.setLineWidth(.6); pdf.line(12, 20, pageWidth - 12, 20)
 
-    const cursor = top + 26
+    const top = 34
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(19); pdf.text(`LINE / MACHINE: ${allocation.machine}`, 12, top)
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(90, 98, 105)
+    pdf.text(`Scheduled ${allocation.day} · Duration ${formatDuration(allocation.duration)}`, 12, top + 9)
+    pdf.text(`Total overdue: ${summary.linePlans.filter((plan) => plan.daysOverdue > 0).length}  ·  Critical: ${summary.distribution.Critical}  ·  Backlog days: ${backlogDays}`, 12, top + 17)
+
+    pdf.setTextColor(120, 128, 134); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6); pdf.text('CRITICALITY DISTRIBUTION', 190, top - 8)
+    drawCriticalityBars(190, top - 1, 68, summary.distribution, total)
+
+    const cursor = top + 32
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11.5); pdf.text('TOP 5 CRITICAL PLANS', 12, cursor - 6)
+
     pdf.setFillColor(239, 241, 244); pdf.rect(12, cursor, 273, 8, 'F')
     pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7)
     pdf.text('Rank', 15, cursor + 5.5); pdf.text('Plan Code / Tag', 30, cursor + 5.5); pdf.text('Activity / Maintenance Task', 65, cursor + 5.5); pdf.text('Frequency', 170, cursor + 5.5); pdf.text('Overdue Status', 205, cursor + 5.5); pdf.text('Severity', 260, cursor + 5.5)
     summary.topTasks.forEach((plan, taskIndex) => {
-      const y = cursor + 14 + taskIndex * 8
+      const y = cursor + 16 + taskIndex * 10
       const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'
-      pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2, 285, y + 2)
-      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
+      pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 3, 285, y + 3)
+      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
       pdf.setTextColor(45, 52, 58); pdf.text(plan.planCode.slice(0, 18), 30, y)
       pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 52), 65, y)
       pdf.setFont('helvetica', 'normal'); pdf.text(plan.frequency, 170, y)
       pdf.setTextColor(...severityColors[severityLabel]); pdf.text(plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : 'On track', 205, y)
       pdf.setFont('helvetica', 'bold'); pdf.text(severityLabel, 260, y)
     })
-    if (blockIndex === 1 || index === allocations.length - 1) drawFooter()
+    drawFooter()
   })
 
   pdf.save('weekly-maintenance-report.pdf')
