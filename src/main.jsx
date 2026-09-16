@@ -1180,6 +1180,7 @@ function RichTextEditor({ value, onChange, placeholder }) {
 function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, onExport }) {
   const [selectedMachines, setSelectedMachines] = useState([])
   const [machineFilterOpen, setMachineFilterOpen] = useState(false)
+  const [priorityVisibleCount, setPriorityVisibleCount] = useState(30)
   const [showReportModal, setShowReportModal] = useState(false)
   const [teamNotes, setTeamNotes] = useState(() => {
     try {
@@ -1211,6 +1212,8 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   const lineFilter = selectedMachines.length ? selectedMachines.join(', ') : 'All production lines'
   const visiblePlans = useMemo(() => plans.filter((plan) => !selectedMachines.length || selectedMachines.includes(plan.machine)), [plans, selectedMachines])
   const prioritizedPlans = useMemo(() => sortMaintenancePlans(visiblePlans), [visiblePlans])
+  const isMultiMachineScope = selectedMachines.length > 1
+  const visiblePriorityPlans = isMultiMachineScope ? prioritizedPlans.slice(0, priorityVisibleCount) : prioritizedPlans
 
   const filteredNotes = useMemo(() => {
     return teamNotes.filter((n) => !selectedMachines.length || n.line === 'All production lines' || selectedMachines.includes(n.line))
@@ -1218,6 +1221,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
 
   const toggleMachine = (machine) => {
     setSelectedMachines((current) => current.includes(machine) ? current.filter((item) => item !== machine) : [...current, machine])
+    setPriorityVisibleCount(30)
   }
 
   const handleAddNote = (e) => {
@@ -1297,7 +1301,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
             {machineFilterOpen && (
               <div className="multi-machine-menu">
                 <label className="multi-machine-option select-all-option">
-                  <input type="checkbox" checked={!selectedMachines.length} onChange={() => setSelectedMachines([])} />
+                  <input type="checkbox" checked={!selectedMachines.length} onChange={() => { setSelectedMachines([]); setPriorityVisibleCount(30) }} />
                   <span>All production lines / machines</span>
                 </label>
                 {machines.map((machine) => (
@@ -1450,12 +1454,16 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
           <span className="priority-count">{prioritizedPlans.length}</span>
           </div>
           <div className="priority-list priority-list-expanded">
-            {prioritizedPlans.map((plan, index) => <PriorityActivity key={plan.id} plan={plan} rank={index + 1} expanded />)}
+            {visiblePriorityPlans.map((plan, index) => <PriorityActivity key={plan.id} plan={plan} rank={index + 1} expanded />)}
             {!prioritizedPlans.length && <div className="empty-dashboard">No activities in scope.</div>}
           </div>
           <div className="priority-footer">
             <span><i className="status-dot status-red" />Line / machine order, then most overdue first</span>
-            <ArrowUpRight size={15} />
+            <div className="priority-footer-actions">
+              {isMultiMachineScope && visiblePriorityPlans.length < prioritizedPlans.length && <button className="button button-secondary priority-load-more" onClick={() => setPriorityVisibleCount((count) => count + 30)}>Load more</button>}
+              {isMultiMachineScope && <small>Showing {visiblePriorityPlans.length} of {prioritizedPlans.length}</small>}
+              <ArrowUpRight size={15} />
+            </div>
           </div>
         </section>
       </main>
