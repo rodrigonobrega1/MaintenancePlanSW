@@ -166,6 +166,9 @@
 .priority-task-actions { display: flex; align-items: center; gap: 6px; }
 .priority-task-actions .note-small-btn { height: 28px; padding: 0 10px; font-size: 10.5px; }
 .priority-dump-textarea { display: block; width: 100%; box-sizing: border-box; min-height: 220px; font-size: 13px; line-height: 1.55; padding: 16px 18px; }
+.priority-category-section { margin-top: 8px; margin-bottom: 22px; }
+.priority-task-checkbox { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: #525d66; cursor: pointer; }
+.priority-task-checkbox input { width: 15px; height: 15px; accent-color: #2e7d4a; cursor: pointer; }
 .spin { animation: report-spin .8s linear infinite; }
 @keyframes report-spin { to { transform: rotate(360deg); } }
 @media print {
