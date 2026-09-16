@@ -344,11 +344,7 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
       notes.forEach((note) => {
         const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
         const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
-        const fullText = notePlainText(note.text).split('\n').filter(Boolean).join('  ')
-
-        pdf.setFont('helvetica', 'normal')
-        pdf.setFontSize(9.5)
-        const bodyLines = pdf.splitTextToSize(fullText, contentWidth - 4)
+        const noteLines = notePdfLines(note.text)
 
         ensureSpace(5.5)
         pdf.setFont('helvetica', 'bold')
@@ -362,14 +358,20 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
           pdf.text(dateStr, 12 + contentWidth - pdf.getTextWidth(dateStr), y)
         }
         y += 5.5
-
         pdf.setFont('helvetica', 'normal')
         pdf.setFontSize(9.5)
         pdf.setTextColor(45, 52, 58)
-        bodyLines.forEach((lineText) => {
-          ensureSpace(5.2)
-          pdf.text(lineText, 16, y)
-          y += 5.2
+        noteLines.forEach((noteLine) => {
+          if (!noteLine) {
+            y += 3
+            return
+          }
+          const wrappedLines = pdf.splitTextToSize(noteLine, contentWidth - 8)
+          wrappedLines.forEach((lineText) => {
+            ensureSpace(5.2)
+            pdf.text(lineText, 16, y)
+            y += 5.2
+          })
         })
 
         y += 5
@@ -1083,6 +1085,33 @@ function notePlainText(value) {
   documentFragment.querySelectorAll('li').forEach((element) => element.prepend('- '))
   documentFragment.querySelectorAll('div,p,blockquote,h1,h2,h3').forEach((element) => element.append('\n'))
   return documentFragment.body.textContent.replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function notePdfLines(value) {
+  const source = noteHtml(value)
+  if (typeof DOMParser === 'undefined') return String(value || '').split('\n')
+  const documentFragment = new DOMParser().parseFromString(source, 'text/html')
+  const lines = []
+  const blocks = Array.from(documentFragment.body.children)
+
+  if (!blocks.length) return [documentFragment.body.textContent || '']
+
+  blocks.forEach((block) => {
+    const tagName = block.tagName.toLowerCase()
+    if (tagName === 'ul' || tagName === 'ol') {
+      Array.from(block.children).forEach((item, index) => {
+        const prefix = tagName === 'ol' ? `${index + 1}. ` : '• '
+        lines.push(`${prefix}${item.textContent.trim()}`)
+      })
+      lines.push('')
+      return
+    }
+    const text = block.textContent.trim()
+    if (text) lines.push(text)
+    lines.push('')
+  })
+
+  return lines.length ? lines.slice(0, -1) : ['']
 }
 
 function RichTextToolbarButton({ label, icon: Icon, command, value }) {
