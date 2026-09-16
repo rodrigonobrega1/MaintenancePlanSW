@@ -70,6 +70,10 @@ const dashboardReportStorageKey = 'fieldmark-dashboard-report'
 const maintenanceScheduleStorageKey = 'fieldmark-maintenance-schedule'
 const teamNotesStorageKey = 'fieldmark-team-notes'
 
+function sortMaintenancePlans(plans) {
+  return [...plans].sort((a, b) => a.machine.localeCompare(b.machine, undefined, { numeric: true, sensitivity: 'base' }) || b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
+}
+
 async function downloadPdf(selector, fileName) {
   const element = document.querySelector(selector)
   if (!element) return
@@ -186,7 +190,7 @@ function exportCriticalPdf(plans, pdf = new jsPDF({ orientation: 'landscape', un
 }
 
 function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) {
-  const ordered = [...plans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
+  const ordered = sortMaintenancePlans(plans)
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
   const pageToken = '{total_pages_count_string}'
@@ -1206,7 +1210,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   const machines = useMemo(() => [...new Set(plans.map((plan) => plan.machine))].sort(), [plans])
   const lineFilter = selectedMachines.length ? selectedMachines.join(', ') : 'All production lines'
   const visiblePlans = useMemo(() => plans.filter((plan) => !selectedMachines.length || selectedMachines.includes(plan.machine)), [plans, selectedMachines])
-  const prioritizedPlans = useMemo(() => [...visiblePlans].sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0)), [visiblePlans])
+  const prioritizedPlans = useMemo(() => sortMaintenancePlans(visiblePlans), [visiblePlans])
 
   const filteredNotes = useMemo(() => {
     return teamNotes.filter((n) => !selectedMachines.length || n.line === 'All production lines' || selectedMachines.includes(n.line))
@@ -1436,37 +1440,25 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
           )}
         </section>
 
-        <div className="dashboard-section-heading">
-          <div>
-            <span className="section-kicker">Plan portfolio</span>
-            <h2>{lineFilter}</h2>
-            <p>Cards ordered by urgency, with overdue activities first.</p>
-          </div>
-          <span className="scope-count">{visiblePlans.length} plans</span>
-        </div>
-        <div className="maintenance-plan-cards">
-          {prioritizedPlans.slice(0, 12).map((plan) => <MaintenancePlanCard key={plan.id} plan={plan} />)}
-          {!visiblePlans.length && <div className="empty-dashboard">No plans match the selected filter.</div>}
-        </div>
-      </main>
-      <aside className="priority-panel">
-        <div className="priority-panel-heading">
+        <section className="priority-panel priority-panel-expanded">
+          <div className="priority-panel-heading">
           <div>
             <span className="section-kicker">Priority queue</span>
             <h2>Prioritized activities</h2>
-            <p>Criticality and delay order</p>
+            <p>Sorted by line / machine first, then overdue days</p>
           </div>
           <span className="priority-count">{prioritizedPlans.length}</span>
-        </div>
-        <div className="priority-list">
-          {prioritizedPlans.slice(0, 10).map((plan, index) => <PriorityActivity key={plan.id} plan={plan} rank={index + 1} />)}
-          {!prioritizedPlans.length && <div className="empty-dashboard">No activities in scope.</div>}
-        </div>
-        <div className="priority-footer">
-          <span><i className="status-dot status-red" />Most overdue first</span>
-          <ArrowUpRight size={15} />
-        </div>
-      </aside>
+          </div>
+          <div className="priority-list priority-list-expanded">
+            {prioritizedPlans.map((plan, index) => <PriorityActivity key={plan.id} plan={plan} rank={index + 1} expanded />)}
+            {!prioritizedPlans.length && <div className="empty-dashboard">No activities in scope.</div>}
+          </div>
+          <div className="priority-footer">
+            <span><i className="status-dot status-red" />Line / machine order, then most overdue first</span>
+            <ArrowUpRight size={15} />
+          </div>
+        </section>
+      </main>
     </div>
 
     {showReportModal && (
@@ -1780,21 +1772,28 @@ function PlanKpi({ icon: Icon, label, value, tone, detail }) {
   return <div className={`plan-kpi plan-kpi-${tone}`}><div className="plan-kpi-icon"><Icon size={17} /></div><div><strong>{value.toLocaleString()}</strong><span>{label}</span><small>{detail}</small></div></div>
 }
 
-function PriorityActivity({ plan, rank }) {
+function PriorityActivity({ plan, rank, expanded = false }) {
   const isOverdue = plan.daysOverdue > 0
   const tone = plan.criticality === 'Critical' ? 'critical' : isOverdue ? 'overdue' : plan.criticality === 'Due soon' ? 'soon' : 'planned'
   const Icon = tone === 'planned' ? CalendarDays : tone === 'soon' ? Clock3 : AlertTriangle
   return (
-    <article className={`priority-activity priority-${tone}`}>
+    <article className={`priority-activity ${expanded ? 'priority-activity-expanded' : ''} priority-${tone}`}>
       <span className="priority-rank">{String(rank).padStart(2, '0')}</span>
       <div className="priority-icon"><Icon size={15} /></div>
       <div className="priority-activity-content">
         <strong>{plan.activity}</strong>
-        <span>{plan.machine}</span>
+        <span>{plan.machine} · {plan.planCode} · {plan.frequency}</span>
         <small className={isOverdue ? 'overdue-text' : ''}>
           {isOverdue ? `${plan.daysOverdue} days overdue` : plan.nextDue ? `Due ${formatPrintDate(plan.nextDue)}` : 'Schedule pending'}
         </small>
       </div>
+      {expanded && <div className="priority-activity-details">
+        <span><small>Execution</small><b>{plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed'}</b></span>
+        <span><small>Next planned</small><b>{plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned'}</b></span>
+        <span><small>Orders</small><b>{plan.completedOrders}/{plan.totalOrders} completed</b></span>
+        <span><small>Completion</small><b>{plan.completionRate}%</b></span>
+        <span><small>Status</small><b>{plan.status || plan.criticality}</b></span>
+      </div>}
       <ArrowUpRight size={14} />
     </article>
   )
