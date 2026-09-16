@@ -1,11 +1,12 @@
 // Brain Dump prioritization screen: turns unstructured notes into a P1/P2/P3 task
 // queue, using OpenRouter's free tier for extraction and a deterministic overdue counter.
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, LoaderCircle, Sparkles, Trash2, Zap } from 'lucide-react'
+import { AlertTriangle, Check, KeyRound, LoaderCircle, Sparkles, Trash2, Zap } from 'lucide-react'
 import { processarPrioridades } from '../services/aiService'
 import { calcularDiasAtraso } from '../utils/dateUtils'
 
 const TASKS_STORAGE_KEY = 'fieldmark-brain-dump-tasks'
+const API_KEY_STORAGE_KEY = 'fieldmark-openrouter-api-key'
 
 const CATEGORIAS = [
   { chave: 'P1', titulo: '🚨 P1 - Urgente (Hoje)', tone: 'red' },
@@ -31,6 +32,9 @@ export default function BrainDumpPrioritizer() {
   const [brainDump, setBrainDump] = useState('')
   const [carregando, setCarregando] = useState(false)
   const [mensagem, setMensagem] = useState('Aguardando análise.')
+  const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem(API_KEY_STORAGE_KEY) || '' } catch { return '' } })
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  const [showApiKeyPanel, setShowApiKeyPanel] = useState(false)
 
   useEffect(() => {
     try { localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tarefas)) } catch {}
@@ -43,7 +47,7 @@ export default function BrainDumpPrioritizer() {
     if (!brainDump.trim()) return
     setCarregando(true)
     try {
-      const { novas_tarefas: novasTarefas, fonte } = await processarPrioridades(brainDump, pendentes)
+      const { novas_tarefas: novasTarefas, fonte } = await processarPrioridades(brainDump, pendentes, apiKey)
       if (!novasTarefas.length) {
         setMensagem('Nenhuma tarefa acionável foi encontrada nesse texto.')
         return
@@ -77,6 +81,19 @@ export default function BrainDumpPrioritizer() {
     setTarefas((atual) => atual.filter((tarefa) => tarefa.id !== id))
   }
 
+  const handleSalvarApiKey = () => {
+    const trimmed = apiKeyDraft.trim()
+    setApiKey(trimmed)
+    try { localStorage.setItem(API_KEY_STORAGE_KEY, trimmed) } catch {}
+    setApiKeyDraft('')
+    setShowApiKeyPanel(false)
+  }
+
+  const handleRemoverApiKey = () => {
+    setApiKey('')
+    try { localStorage.removeItem(API_KEY_STORAGE_KEY) } catch {}
+  }
+
   return (
     <div className="page-wrap plan-dashboard-page priority-portal-page">
       <div className="plan-dashboard-head">
@@ -85,16 +102,47 @@ export default function BrainDumpPrioritizer() {
           <h1>Brain Dump &amp; Priorização</h1>
           <p>Descarregue suas ideias e deixe a IA organizar o que é urgente, importante e rotina.</p>
         </div>
+        <div className="intro-actions no-print">
+          <button className="button button-secondary" onClick={() => setShowApiKeyPanel((current) => !current)}>
+            <KeyRound size={15} />{apiKey ? 'Chave OpenRouter configurada' : 'Configurar chave OpenRouter'}
+          </button>
+        </div>
       </div>
 
       <div className="plan-source-strip">
         <div className="file-icon">AI</div>
         <div>
-          <strong>OpenRouter · openrouter/free</strong>
+          <strong>{apiKey ? 'OpenRouter · openrouter/free' : 'Parser local (sem chave configurada)'}</strong>
           <span>{mensagem}</span>
         </div>
-        <span className="live-pill"><i />IA</span>
+        <span className="live-pill"><i />{apiKey ? 'IA' : 'Local'}</span>
       </div>
+
+      {showApiKeyPanel && (
+        <section className="plan-filter-panel no-print">
+          <div className="filter-title">
+            <KeyRound size={16} />
+            <strong>Chave da API OpenRouter</strong>
+            <span>Fica salva apenas neste navegador (localStorage) · nunca é enviada ao repositório ou a terceiros além da própria OpenRouter.</span>
+          </div>
+          <div className="plan-filter-controls">
+            <label>
+              <span>API key</span>
+              <div className="select-wrap">
+                <input
+                  type="password"
+                  value={apiKeyDraft}
+                  onChange={(event) => setApiKeyDraft(event.target.value)}
+                  placeholder="Cole sua chave sk-or-..."
+                  style={{ border: 0, outline: 0, width: '100%', background: 'transparent' }}
+                />
+              </div>
+            </label>
+            <button className="button button-primary" disabled={!apiKeyDraft.trim()} onClick={handleSalvarApiKey}>Salvar chave</button>
+            {apiKey && <button className="button button-secondary" onClick={handleRemoverApiKey}>Remover chave</button>}
+          </div>
+        </section>
+      )}
 
       <div className="plan-kpi-grid" style={{ marginTop: 0, marginBottom: 18 }}>
         <div className="plan-kpi plan-kpi-red">
