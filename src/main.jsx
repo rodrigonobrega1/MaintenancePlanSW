@@ -74,6 +74,83 @@ function sortMaintenancePlans(plans) {
   return [...plans].sort((a, b) => a.machine.localeCompare(b.machine, undefined, { numeric: true, sensitivity: 'base' }) || b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
 }
 
+function getTopCriticalTasksPerLine(plans, machine, limit = 5) {
+  const linePlans = plans.filter((plan) => plan.machine === machine)
+  const severity = (plan) => plan.criticality === 'Critical' ? 3 : plan.daysOverdue > 0 || plan.criticality === 'Overdue' ? 2 : 1
+  const topTasks = [...linePlans].sort((a, b) => severity(b) - severity(a) || b.daysOverdue - a.daysOverdue || a.activity.localeCompare(b.activity)).slice(0, limit)
+  const distribution = { Critical: 0, Overdue: 0, Normal: 0 }
+  linePlans.forEach((plan) => { distribution[severity(plan) === 3 ? 'Critical' : severity(plan) === 2 ? 'Overdue' : 'Normal'] += 1 })
+  return { linePlans, topTasks, distribution }
+}
+
+function exportWeeklyMaintenanceReport({ plans, allocations, line }) {
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+  const pageWidth = 297
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  const colors = { Critical: [198, 91, 83], Overdue: [216, 137, 56], Normal: [101, 143, 116] }
+  const formatDuration = (value) => value || 'Full Day'
+  const drawHeader = (title, subtitle) => {
+    pdf.setTextColor(37, 40, 45); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(18); pdf.text(title, 12, 14)
+    pdf.setTextColor(185, 106, 53); pdf.setFontSize(8); pdf.text(`SELECTED LINES: ${line.toUpperCase()}`, 12, 20)
+    pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.text(`ISSUED: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, 232, 20)
+    pdf.setDrawColor(220, 224, 228); pdf.setLineWidth(.6); pdf.line(12, 23, pageWidth - 12, 23)
+    pdf.setFontSize(8); pdf.setTextColor(110, 118, 125); pdf.text(subtitle, 12, 28)
+  }
+  const drawFooter = () => { pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`Maintenance Planning · Weekly Maintenance Report · Page ${pdf.getNumberOfPages()}`, 12, 203) }
+
+  drawHeader('Weekly Maintenance Report', 'Shutdown allocation and critical maintenance activities')
+  pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.text('Weekly shutdown schedule', 12, 39)
+  const gridX = 48; const gridY = 48; const dayWidth = 31.5; const rowHeight = 13
+  pdf.setFillColor(239, 241, 244); pdf.rect(gridX, gridY, dayWidth * 7, 9, 'F')
+  pdf.setFontSize(7); pdf.setTextColor(70, 78, 85); days.forEach((day, index) => pdf.text(day.slice(0, 3), gridX + index * dayWidth + 11, gridY + 6))
+  allocations.forEach((allocation, rowIndex) => {
+    const y = gridY + 9 + rowIndex * rowHeight
+    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text(allocation.machine.slice(0, 20), 12, y + 8)
+    pdf.setDrawColor(235, 238, 240); pdf.line(gridX, y + rowHeight, gridX + dayWidth * 7, y + rowHeight)
+    const dayIndex = days.indexOf(allocation.day)
+    if (dayIndex >= 0) {
+      pdf.setFillColor(217, 130, 59); pdf.roundedRect(gridX + dayIndex * dayWidth + 2, y + 2, dayWidth - 4, 8, 1.5, 1.5, 'F')
+      pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.text(formatDuration(allocation.duration).slice(0, 17), gridX + dayIndex * dayWidth + 5, y + 7)
+    }
+  })
+  drawFooter()
+
+  allocations.forEach((allocation, index) => {
+    if (index % 2 === 0) pdf.addPage()
+    const blockIndex = index % 2
+    const top = blockIndex === 0 ? 35 : 128
+    const summary = getTopCriticalTasksPerLine(plans, allocation.machine)
+    const total = summary.linePlans.length || 1
+    drawHeader(`Line ${allocation.machine} · Weekly Breakdown`, `${allocation.day} · Duration: ${formatDuration(allocation.duration)} · Top 5 critical activities`)
+    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.text(`LINE / MACHINE: ${allocation.machine}`, 12, top)
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(90, 98, 105); pdf.text(`Scheduled: ${allocation.day} · Duration: ${formatDuration(allocation.duration)}`, 12, top + 7)
+    pdf.text(`Total overdue: ${summary.linePlans.filter((plan) => plan.daysOverdue > 0).length} · Critical: ${summary.distribution.Critical} · Backlog days: ${summary.linePlans.reduce((sum, plan) => sum + plan.daysOverdue, 0)}`, 12, top + 13)
+    let cursor = top + 25
+    const centerX = 260; const centerY = top + 9; const radius = 12; let startAngle = -90
+    Object.entries(summary.distribution).forEach(([label, count]) => {
+      if (!count) return
+      const angle = count / total * 360
+      const steps = Math.max(1, Math.ceil(angle / 12))
+      pdf.setFillColor(...colors[label])
+      for (let step = 0; step < steps; step += 1) {
+        const angleStart = (startAngle + (angle * step) / steps) * Math.PI / 180
+        const angleEnd = (startAngle + (angle * (step + 1)) / steps) * Math.PI / 180
+        const x1 = centerX + Math.cos(angleStart) * radius
+        const y1 = centerY + Math.sin(angleStart) * radius
+        const x2 = centerX + Math.cos(angleEnd) * radius
+        const y2 = centerY + Math.sin(angleEnd) * radius
+        pdf.triangle(centerX, centerY, x1, y1, x2, y2, 'F')
+      }
+      startAngle += angle
+    })
+    pdf.setTextColor(80, 88, 95); pdf.setFontSize(6.5); pdf.text('Criticality', 248, top + 24); pdf.setFillColor(...colors.Critical); pdf.rect(248, top + 27, 3, 3, 'F'); pdf.text(`Critical ${summary.distribution.Critical}`, 253, top + 30); pdf.setFillColor(...colors.Overdue); pdf.rect(248, top + 33, 3, 3, 'F'); pdf.text(`Overdue ${summary.distribution.Overdue}`, 253, top + 36)
+    pdf.setFillColor(239, 241, 244); pdf.rect(12, cursor, 273, 8, 'F'); pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.text('Rank', 15, cursor + 5.5); pdf.text('Plan Code / Tag', 30, cursor + 5.5); pdf.text('Activity / Maintenance Task', 65, cursor + 5.5); pdf.text('Frequency', 170, cursor + 5.5); pdf.text('Overdue Status', 205, cursor + 5.5); pdf.text('Severity', 260, cursor + 5.5)
+    summary.topTasks.forEach((plan, taskIndex) => { const y = cursor + 14 + taskIndex * 8; const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'; pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2, 285, y + 2); pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y); pdf.setTextColor(45, 52, 58); pdf.text(plan.planCode.slice(0, 18), 30, y); pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 52), 65, y); pdf.setFont('helvetica', 'normal'); pdf.text(plan.frequency, 170, y); pdf.setTextColor(...colors[severityLabel]); pdf.text(plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : 'On track', 205, y); pdf.setFont('helvetica', 'bold'); pdf.text(severityLabel, 260, y) })
+    if (blockIndex === 1 || index === allocations.length - 1) drawFooter()
+  })
+  pdf.save('weekly-maintenance-report.pdf')
+}
+
 async function downloadPdf(selector, fileName) {
   const element = document.querySelector(selector)
   if (!element) return
@@ -1182,6 +1259,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   const [machineFilterOpen, setMachineFilterOpen] = useState(false)
   const [priorityVisibleCount, setPriorityVisibleCount] = useState(10)
   const [showReportModal, setShowReportModal] = useState(false)
+  const [showWeeklyReportModal, setShowWeeklyReportModal] = useState(false)
   const [teamNotes, setTeamNotes] = useState(() => {
     try {
       const saved = localStorage.getItem(teamNotesStorageKey)
@@ -1272,6 +1350,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
       <div className="intro-actions no-print">
         <label className="button button-primary upload-button"><Upload size={17} />Upload Excel<input type="file" accept=".xlsx,.xls" onChange={onUpload} /></label>
         <button className="button button-secondary" onClick={() => setShowReportModal(true)}><FileDown size={15} />Report</button>
+        <button className="button button-secondary" disabled={!selectedMachines.length} onClick={() => setShowWeeklyReportModal(true)}><CalendarDays size={15} />Weekly Report</button>
       </div>
     </div>
     <div className="plan-source-strip">
@@ -1476,6 +1555,16 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
         onGenerate={(shutdownDate) => {
           setShowReportModal(false)
           onExport(visiblePlans, lineFilter, filteredNotes, shutdownDate)
+        }}
+      />
+    )}
+    {showWeeklyReportModal && (
+      <WeeklyReportModal
+        lines={selectedMachines}
+        onClose={() => setShowWeeklyReportModal(false)}
+        onGenerate={(allocations) => {
+          setShowWeeklyReportModal(false)
+          exportWeeklyMaintenanceReport({ plans: visiblePlans, allocations, line: lineFilter })
         }}
       />
     )}
@@ -2266,6 +2355,40 @@ function ReportShutdownModal({ line, plansCount, onClose, onGenerate }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+function WeeklyReportModal({ lines, onClose, onGenerate }) {
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  const [allocations, setAllocations] = useState(() => lines.map((machine, index) => ({ machine, day: days[index % days.length], duration: 'Full Day' })))
+  const updateAllocation = (machine, field, value) => setAllocations((current) => current.map((allocation) => allocation.machine === machine ? { ...allocation, [field]: value } : allocation))
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal weekly-report-modal" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-heading">
+          <div>
+            <div className="eyebrow">Weekly maintenance report</div>
+            <h2>Schedule Weekly Maintenance Shutdowns</h2>
+            <p className="modal-description">Assign one shutdown day and an estimated duration to each selected line.</p>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close weekly report"><X size={19} /></button>
+        </div>
+        <div className="weekly-allocation-list">
+          {allocations.map((allocation) => (
+            <div className="weekly-allocation-row" key={allocation.machine}>
+              <strong>{allocation.machine}</strong>
+              <label><span>Shutdown day</span><select value={allocation.day} onChange={(event) => updateAllocation(allocation.machine, 'day', event.target.value)}>{days.map((day) => <option key={day}>{day}</option>)}</select></label>
+              <label><span>Estimated duration</span><input value={allocation.duration} onChange={(event) => updateAllocation(allocation.machine, 'duration', event.target.value)} placeholder="8h / Full Day" /></label>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="button button-secondary" onClick={onClose}>Cancel</button>
+          <button type="button" className="button button-primary" onClick={() => onGenerate(allocations)}><FileDown size={15} />Confirm &amp; Generate Weekly Report</button>
+        </div>
       </div>
     </div>
   )
