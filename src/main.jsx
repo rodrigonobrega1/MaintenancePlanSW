@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState } from 'react'
+import { StrictMode, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import * as XLSX from 'xlsx'
 import html2canvas from 'html2canvas'
@@ -7,6 +7,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowUpRight,
+  Bold,
   BookOpen,
   CalendarDays,
   Check,
@@ -20,10 +21,12 @@ import {
   Filter,
   FileDown,
   FileSpreadsheet,
-  FileText,
   GanttChart,
+  Italic,
   LayoutDashboard,
   ListFilter,
+  List,
+  ListOrdered,
   LoaderCircle,
   Menu,
   MessageSquare,
@@ -37,6 +40,7 @@ import {
   Sparkles,
   StickyNote,
   Trash2,
+  Underline,
   Info,
   Upload,
   WandSparkles,
@@ -45,7 +49,6 @@ import {
   Zap,
 } from 'lucide-react'
 import BrainDumpPrioritizer from './components/BrainDumpPrioritizer.jsx'
-import { extractDmsNotesFromPdf } from './utils/pdfTableExtractor.js'
 import './styles.css'
 
 const initialTasks = [
@@ -341,7 +344,7 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
       notes.forEach((note) => {
         const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
         const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
-        const fullText = String(note.text).split('\n').filter(Boolean).join('  ')
+        const fullText = notePlainText(note.text).split('\n').filter(Boolean).join('  ')
 
         pdf.setFont('helvetica', 'normal')
         pdf.setFontSize(9.5)
@@ -1049,6 +1052,89 @@ function Dashboard({ tasks, report, uploadError, uploading, onUpload, onNavigate
   </div>
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+}
+
+function noteHtml(value) {
+  if (!value) return ''
+  if (/<[a-z][\s\S]*>/i.test(value)) return value
+  return escapeHtml(value).replace(/\n/g, '<br>')
+}
+
+function sanitizeNoteHtml(value) {
+  const source = noteHtml(value)
+  if (typeof DOMParser === 'undefined') return source
+  const documentFragment = new DOMParser().parseFromString(source, 'text/html')
+  documentFragment.querySelectorAll('script,style,iframe,object,embed').forEach((element) => element.remove())
+  documentFragment.querySelectorAll('*').forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      if (attribute.name.startsWith('on') || attribute.name === 'style' || attribute.name === 'class' || attribute.name === 'id') element.removeAttribute(attribute.name)
+    })
+  })
+  return documentFragment.body.innerHTML
+}
+
+function notePlainText(value) {
+  if (!/<[a-z][\s\S]*>/i.test(value || '')) return String(value || '')
+  const documentFragment = new DOMParser().parseFromString(value, 'text/html')
+  documentFragment.querySelectorAll('br').forEach((element) => element.replaceWith('\n'))
+  documentFragment.querySelectorAll('li').forEach((element) => element.prepend('- '))
+  documentFragment.querySelectorAll('div,p,blockquote,h1,h2,h3').forEach((element) => element.append('\n'))
+  return documentFragment.body.textContent.replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function RichTextToolbarButton({ label, icon: Icon, command, value }) {
+  return (
+    <button
+      type="button"
+      className="rich-text-toolbar-button"
+      title={label}
+      aria-label={label}
+      onMouseDown={(event) => {
+        event.preventDefault()
+        document.execCommand(command, false, value)
+      }}
+    >
+      <Icon size={15} />
+    </button>
+  )
+}
+
+function RichTextEditor({ value, onChange, placeholder }) {
+  const editorRef = useRef(null)
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== noteHtml(value)) editorRef.current.innerHTML = noteHtml(value)
+  }, [value])
+
+  return (
+    <div className="rich-text-editor">
+      <div className="rich-text-toolbar" aria-label="Text formatting toolbar">
+        <RichTextToolbarButton label="Bold" icon={Bold} command="bold" />
+        <RichTextToolbarButton label="Italic" icon={Italic} command="italic" />
+        <RichTextToolbarButton label="Underline" icon={Underline} command="underline" />
+        <span className="rich-text-toolbar-divider" />
+        <RichTextToolbarButton label="Bulleted list" icon={List} command="insertUnorderedList" />
+        <RichTextToolbarButton label="Numbered list" icon={ListOrdered} command="insertOrderedList" />
+      </div>
+      <div
+        ref={editorRef}
+        className="notes-rich-editor"
+        contentEditable
+        role="textbox"
+        aria-multiline="true"
+        data-placeholder={placeholder}
+        onInput={(event) => onChange(event.currentTarget.innerHTML)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) event.preventDefault()
+        }}
+        suppressContentEditableWarning
+      />
+    </div>
+  )
+}
+
 function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, onExport }) {
   const [lineFilter, setLineFilter] = useState('All production lines')
   const [showReportModal, setShowReportModal] = useState(false)
@@ -1071,10 +1157,6 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   const [newNoteLine, setNewNoteLine] = useState('Current line')
   const [editingNoteId, setEditingNoteId] = useState(null)
   const [editingNoteText, setEditingNoteText] = useState('')
-  const [noteInputMode, setNoteInputMode] = useState('text')
-  const [pdfExtracting, setPdfExtracting] = useState(false)
-  const [pdfError, setPdfError] = useState('')
-  const [pdfPreviewGroups, setPdfPreviewGroups] = useState([])
 
   useEffect(() => {
     try {
@@ -1092,11 +1174,11 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
 
   const handleAddNote = (e) => {
     if (e) e.preventDefault()
-    const trimmed = newNoteText.trim()
+    const trimmed = notePlainText(newNoteText).trim()
     if (!trimmed) return
     const note = {
       id: `note-${Date.now()}`,
-      text: trimmed,
+      text: sanitizeNoteHtml(newNoteText),
       line: newNoteLine === 'Current line' ? lineFilter : 'All production lines',
       createdAt: new Date().toISOString(),
     }
@@ -1108,49 +1190,15 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
     setTeamNotes((prev) => prev.filter((n) => n.id !== id))
   }
 
-  const handlePdfUpload = async (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    setPdfExtracting(true)
-    setPdfError('')
-    setPdfPreviewGroups([])
-    try {
-      const groups = await extractDmsNotesFromPdf(file)
-      setPdfPreviewGroups(groups)
-    } catch (extractError) {
-      setPdfError(extractError.message || 'Could not read the DMS board table from this PDF.')
-    } finally {
-      setPdfExtracting(false)
-      event.target.value = ''
-    }
-  }
-
-  const handleAddExtractedNotes = () => {
-    if (!pdfPreviewGroups.length) return
-    const createdNotes = pdfPreviewGroups.map((group, index) => ({
-      id: `note-${Date.now()}-${index}`,
-      text: `CHECK DMS BOARD TASKS\n${group.rows.map((row) => `- ${row.description}`).join('\n')}`,
-      line: machines.includes(group.machine) ? group.machine : 'All production lines',
-      createdAt: new Date().toISOString(),
-    }))
-    setTeamNotes((prev) => [...createdNotes, ...prev])
-    setPdfPreviewGroups([])
-  }
-
-  const handleDiscardPdfPreview = () => {
-    setPdfPreviewGroups([])
-    setPdfError('')
-  }
-
   const handleStartEdit = (note) => {
     setEditingNoteId(note.id)
     setEditingNoteText(note.text)
   }
 
   const handleSaveEdit = (id) => {
-    const trimmed = editingNoteText.trim()
+    const trimmed = notePlainText(editingNoteText).trim()
     if (!trimmed) return
-    setTeamNotes((prev) => prev.map((n) => n.id === id ? { ...n, text: trimmed, updatedAt: new Date().toISOString() } : n))
+    setTeamNotes((prev) => prev.map((n) => n.id === id ? { ...n, text: sanitizeNoteHtml(editingNoteText), updatedAt: new Date().toISOString() } : n))
     setEditingNoteId(null)
     setEditingNoteText('')
   }
@@ -1228,70 +1276,20 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
               </div>
             </div>
 
-            <div className="notes-mode-toggle">
-              <button className={noteInputMode === 'text' ? 'active' : ''} onClick={() => setNoteInputMode('text')}>
-                <Pencil size={13} />Write text
-              </button>
-              <button className={noteInputMode === 'pdf' ? 'active' : ''} onClick={() => setNoteInputMode('pdf')}>
-                <FileText size={13} />Upload PDF (DMS Board)
+            <div className="notes-input-row rich-notes-input-row">
+              <RichTextEditor
+                value={newNoteText}
+                onChange={setNewNoteText}
+                placeholder="Type an operational note, shift handover, or priority instruction for the team..."
+              />
+              <button
+                className="button button-primary add-note-submit-btn"
+                disabled={!notePlainText(newNoteText).trim()}
+                onClick={handleAddNote}
+              >
+                <Plus size={15} /> Add Note
               </button>
             </div>
-
-            {noteInputMode === 'text' ? (
-              <div className="notes-input-row">
-                <textarea
-                  className="notes-textarea"
-                  placeholder="Type an operational note, shift handover, or priority instruction for the team..."
-                  value={newNoteText}
-                  onChange={(e) => setNewNoteText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                      handleAddNote(e)
-                    }
-                  }}
-                  rows={2}
-                />
-                <button
-                  className="button button-primary add-note-submit-btn"
-                  disabled={!newNoteText.trim()}
-                  onClick={handleAddNote}
-                >
-                  <Plus size={15} /> Add Note
-                </button>
-              </div>
-            ) : (
-              <div className="pdf-note-uploader">
-                <label className="button button-secondary upload-button pdf-upload-btn">
-                  <FileText size={15} />
-                  {pdfExtracting ? 'Reading PDF...' : 'Choose DMS Board PDF'}
-                  <input type="file" accept=".pdf" onChange={handlePdfUpload} disabled={pdfExtracting} />
-                </label>
-                <span className="pdf-upload-hint">Upload the DMS Dashboard Follow Up export — the Description column will be read automatically.</span>
-
-                {pdfError && <div className="upload-error"><AlertTriangle size={15} />{pdfError}</div>}
-
-                {pdfPreviewGroups.length > 0 && (
-                  <div className="pdf-preview-box">
-                    <div className="pdf-preview-heading">
-                      <strong>Extracted from PDF</strong>
-                      <span>Review before adding to Team Notes</span>
-                    </div>
-                    {pdfPreviewGroups.map((group) => (
-                      <div key={group.machine} className="pdf-preview-group">
-                        <span className="team-note-line-tag"><StickyNote size={12} />{group.machine || 'All production lines'}</span>
-                        <ul>
-                          {group.rows.map((row) => <li key={row.id}>{row.description}</li>)}
-                        </ul>
-                      </div>
-                    ))}
-                    <div className="pdf-preview-actions">
-                      <button className="button button-primary note-small-btn" onClick={handleAddExtractedNotes}><Plus size={13} />Add to Team Notes</button>
-                      <button className="button button-secondary note-small-btn" onClick={handleDiscardPdfPreview}>Discard</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {filteredNotes.length > 0 && (
@@ -1358,11 +1356,10 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
 
                   {editingNoteId === note.id ? (
                     <div className="team-note-inline-edit">
-                      <textarea
+                      <RichTextEditor
                         value={editingNoteText}
-                        onChange={(e) => setEditingNoteText(e.target.value)}
-                        rows={2}
-                        autoFocus
+                        onChange={setEditingNoteText}
+                        placeholder="Edit this operational note..."
                       />
                       <div className="team-note-edit-buttons">
                         <button className="button button-primary note-small-btn" onClick={() => handleSaveEdit(note.id)}>
@@ -1374,7 +1371,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
                       </div>
                     </div>
                   ) : (
-                    <p className="team-note-body">{note.text}</p>
+                    <div className="team-note-body" dangerouslySetInnerHTML={{ __html: sanitizeNoteHtml(note.text) }} />
                   )}
                 </article>
               ))}

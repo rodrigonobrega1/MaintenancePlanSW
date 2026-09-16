@@ -167,21 +167,22 @@
 .priority-task-actions .note-small-btn { height: 28px; padding: 0 10px; font-size: 10.5px; }
 .priority-dump-textarea { display: block; width: 100%; box-sizing: border-box; min-height: 220px; font-size: 13px; line-height: 1.55; padding: 16px 18px; }
 
-/* Team Notes: text vs PDF upload mode */
-.notes-mode-toggle { display: flex; gap: 6px; margin-bottom: 10px; }
-.notes-mode-toggle button { display: flex; align-items: center; gap: 6px; border: 1px solid #e0e3e6; border-radius: 6px; padding: 6px 11px; background: #fff; color: #69737b; font-size: 11px; font-weight: 600; transition: .15s ease; }
-.notes-mode-toggle button:hover { border-color: #d9823b; color: #b96a2f; }
-.notes-mode-toggle button.active { background: #d9823b; border-color: #d9823b; color: #fff; }
-.pdf-note-uploader { display: grid; gap: 8px; }
-.pdf-upload-btn input[type="file"] { display: none; }
-.pdf-upload-hint { color: #8a9299; font-size: 10.5px; line-height: 1.4; }
-.pdf-preview-box { display: grid; gap: 10px; padding: 12px 14px; background: #f8faf9; border: 1px solid #e0e6e3; border-radius: 8px; }
-.pdf-preview-heading { display: flex; align-items: baseline; justify-content: space-between; }
-.pdf-preview-heading strong { color: #2e353c; font-size: 12px; }
-.pdf-preview-heading span { color: #8a9299; font-size: 10.5px; }
-.pdf-preview-group { display: grid; gap: 4px; }
-.pdf-preview-group ul { margin: 0; padding-left: 20px; color: #38424a; font-size: 11.5px; line-height: 1.5; }
-.pdf-preview-actions { display: flex; gap: 8px; }
+/* Team Notes rich-text editor */
+.rich-notes-input-row { align-items: flex-end; }
+.rich-text-editor { flex: 1; min-width: 0; border: 1px solid #dce0e3; border-radius: 6px; overflow: hidden; background: #fff; transition: border-color .15s ease, box-shadow .15s ease; }
+.rich-text-editor:focus-within { border-color: #d9823b; box-shadow: 0 0 0 2px #d9823b18; }
+.rich-text-toolbar { display: flex; align-items: center; gap: 2px; min-height: 34px; padding: 3px 7px; border-bottom: 1px solid #e8ebed; background: #fafbfb; }
+.rich-text-toolbar-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 27px; border: 0; border-radius: 4px; background: transparent; color: #5d6870; cursor: pointer; }
+.rich-text-toolbar-button:hover { background: #eceff0; color: #2e353c; }
+.rich-text-toolbar-divider { width: 1px; height: 20px; margin: 0 5px; background: #dce0e3; }
+.notes-rich-editor { min-height: 116px; padding: 11px 13px; outline: none; color: #2e353c; font-size: 12px; line-height: 1.55; white-space: normal; }
+.notes-rich-editor:empty::before { content: attr(data-placeholder); color: #9aa2a8; pointer-events: none; }
+.notes-rich-editor ul, .notes-rich-editor ol { margin: 5px 0; padding-left: 22px; }
+.notes-rich-editor p { margin: 0 0 5px; }
+.team-note-body ul, .team-note-body ol { margin: 5px 0; padding-left: 20px; }
+.team-note-body p { margin: 0 0 5px; }
+.team-note-body strong { font-weight: 700; color: #293139; }
+.team-note-body em { font-style: italic; }
 .priority-category-section { margin-top: 8px; margin-bottom: 22px; }
 .priority-task-checkbox { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: #525d66; cursor: pointer; }
 .priority-task-checkbox input { width: 15px; height: 15px; accent-color: #2e7d4a; cursor: pointer; }
