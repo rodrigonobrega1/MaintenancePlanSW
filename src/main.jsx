@@ -235,6 +235,59 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
     pdf.text(`Page ${page} of ${pageToken}`, pageWidth - 32, 203)
   }
 
+  // Renders the notes as a plain list (no card/box), with unrestricted wrapped text.
+  // Pass dryRun to measure the resulting height without drawing anything.
+  const renderNotesList = (startY, maxWidth, { dryRun = false } = {}) => {
+    let y = startY
+
+    if (!dryRun) {
+      pdf.setTextColor(185, 106, 53)
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(11)
+      pdf.text('IMPORTANT NOTES', 12, y)
+      pdf.setDrawColor(217, 130, 59)
+      pdf.setLineWidth(0.5)
+      pdf.line(12, y + 2.5, 12 + maxWidth, y + 2.5)
+    }
+    y += 9
+
+    notes.forEach((note) => {
+      const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
+      const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
+      const fullText = String(note.text).split('\n').filter(Boolean).join('  ')
+
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(9.5)
+      const tagWidth = pdf.getTextWidth(`${tag}  `)
+      pdf.setFont('helvetica', 'normal')
+      const lines = pdf.splitTextToSize(fullText, maxWidth - tagWidth - 4)
+
+      if (!dryRun) {
+        pdf.setFont('helvetica', 'bold')
+        pdf.setTextColor(185, 106, 53)
+        pdf.text(`• ${tag}`, 12, y)
+        pdf.setFont('helvetica', 'normal')
+        pdf.setTextColor(45, 52, 58)
+        pdf.text(lines[0] || '', 12 + tagWidth + 3, y)
+        if (dateStr) {
+          pdf.setTextColor(150, 157, 163)
+          pdf.setFontSize(7.5)
+          pdf.text(dateStr, 12 + maxWidth - pdf.getTextWidth(dateStr), y)
+          pdf.setFontSize(9.5)
+        }
+      }
+
+      lines.slice(1).forEach((lineText) => {
+        y += 5.2
+        if (!dryRun) pdf.text(lineText, 12 + tagWidth + 3, y)
+      })
+
+      y += 8
+    })
+
+    return y
+  }
+
   // --- PAGE 1: Top Priority Cards ---
   const topCards = ordered.slice(0, 12)
   drawHeader(
@@ -350,101 +403,22 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
       pdf.text(sevLabel, 268, rowY)
     })
 
-    // If on the last page and notes exist, print notes section if space allows or add page
+    // If on the last page and notes exist, print notes list (fits inline or on a dedicated page)
     if (p === totalListPages - 1 && notes && notes.length > 0) {
       const lastRowY = listStart + 13 + pagePlans.length * 8.5
-      if (lastRowY <= 145) {
-        const notesStartY = Math.max(lastRowY + 6, 138)
-        const availableHeight = 198 - notesStartY
+      const notesStartY = Math.max(lastRowY + 8, 140)
+      const estimatedEndY = renderNotesList(notesStartY, 273, { dryRun: true })
 
-        pdf.setFillColor(254, 252, 246)
-        pdf.setDrawColor(217, 130, 59)
-        pdf.setLineWidth(0.8)
-        pdf.roundedRect(12, notesStartY, 273, Math.min(52, availableHeight), 2, 2, 'FD')
-
-        pdf.setTextColor(185, 106, 53)
-        pdf.setFont('helvetica', 'bold')
-        pdf.setFontSize(10.5)
-        pdf.text(`TEAM OPERATIONAL NOTES & SHIFT INSTRUCTIONS (${notes.length})`, 16, notesStartY + 7)
-
-        pdf.setTextColor(45, 52, 58)
-        pdf.setFontSize(9)
-        notes.slice(0, 4).forEach((note, nIdx) => {
-          const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
-          const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
-          const yPos = notesStartY + 15 + nIdx * 8
-          const firstLine = String(note.text).split('\n')[0]
-
-          pdf.setTextColor(185, 106, 53)
-          pdf.setFont('helvetica', 'bold')
-          pdf.text(`• ${tag}`, 16, yPos)
-
-          pdf.setTextColor(45, 52, 58)
-          pdf.setFont('helvetica', 'normal')
-          const textOffset = 16 + pdf.getTextWidth(`• ${tag} `)
-          pdf.text(`${firstLine}`.slice(0, 110), textOffset, yPos)
-
-          if (dateStr) {
-            pdf.setTextColor(125, 133, 140)
-            pdf.setFontSize(7.5)
-            pdf.text(`(${dateStr})`, 252, yPos)
-            pdf.setFontSize(9)
-          }
-        })
+      if (estimatedEndY <= 198) {
+        renderNotesList(notesStartY, 273)
       } else {
-        // Overflow to dedicated notes page
+        // Overflow to a dedicated notes page
         pdf.addPage()
         drawHeader(
-          'Team Operational Notes & Shift Instructions',
-          `Directives and operational reminders for ${line} · Shutdown: ${shutdownLabel}`
+          'Important Notes',
+          `Operational notes and shift instructions for ${line} · Shutdown: ${shutdownLabel}`
         )
-
-        const notesStartY = 33
-        const totalContentLines = notes.reduce((sum, note) => sum + String(note.text).split('\n').length, 0)
-        const boxHeight = Math.min(180, 18 + totalContentLines * 6 + notes.length * 3)
-        pdf.setFillColor(254, 252, 246)
-        pdf.setDrawColor(217, 130, 59)
-        pdf.setLineWidth(0.8)
-        pdf.roundedRect(12, notesStartY, 273, boxHeight, 2, 2, 'FD')
-
-        pdf.setTextColor(185, 106, 53)
-        pdf.setFont('helvetica', 'bold')
-        pdf.setFontSize(11)
-        pdf.text(`TEAM OPERATIONAL NOTES & SHIFT INSTRUCTIONS (${notes.length})`, 16, notesStartY + 8.5)
-
-        let yCursor = notesStartY + 18
-        notes.forEach((note) => {
-          const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
-          const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
-          const [headerLine, ...subLines] = String(note.text).split('\n')
-
-          pdf.setTextColor(185, 106, 53)
-          pdf.setFont('helvetica', 'bold')
-          pdf.setFontSize(9)
-          pdf.text(`• ${tag}`, 16, yCursor)
-
-          pdf.setTextColor(45, 52, 58)
-          pdf.setFont('helvetica', 'normal')
-          pdf.setFontSize(9.5)
-          const textOffset = 16 + pdf.getTextWidth(`• ${tag} `)
-          pdf.text(headerLine, textOffset, yCursor)
-
-          if (dateStr) {
-            pdf.setTextColor(125, 133, 140)
-            pdf.setFontSize(8)
-            pdf.text(`(${dateStr})`, 250, yCursor)
-          }
-
-          subLines.forEach((subLine) => {
-            yCursor += 6
-            pdf.setTextColor(70, 78, 85)
-            pdf.setFont('helvetica', 'normal')
-            pdf.setFontSize(9)
-            pdf.text(subLine, 22, yCursor)
-          })
-
-          yCursor += 9
-        })
+        renderNotesList(35, 273)
       }
     }
 
