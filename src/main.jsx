@@ -20,6 +20,7 @@ import {
   Filter,
   FileDown,
   FileSpreadsheet,
+  FileText,
   GanttChart,
   LayoutDashboard,
   ListFilter,
@@ -44,6 +45,7 @@ import {
   Zap,
 } from 'lucide-react'
 import BrainDumpPrioritizer from './components/BrainDumpPrioritizer.jsx'
+import { extractDmsNotesFromPdf } from './utils/pdfTableExtractor.js'
 import './styles.css'
 
 const initialTasks = [
@@ -371,6 +373,7 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
           const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
           const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
           const yPos = notesStartY + 15 + nIdx * 8
+          const firstLine = String(note.text).split('\n')[0]
 
           pdf.setTextColor(185, 106, 53)
           pdf.setFont('helvetica', 'bold')
@@ -379,7 +382,7 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
           pdf.setTextColor(45, 52, 58)
           pdf.setFont('helvetica', 'normal')
           const textOffset = 16 + pdf.getTextWidth(`• ${tag} `)
-          pdf.text(`${note.text}`.slice(0, 110), textOffset, yPos)
+          pdf.text(`${firstLine}`.slice(0, 110), textOffset, yPos)
 
           if (dateStr) {
             pdf.setTextColor(125, 133, 140)
@@ -397,39 +400,50 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
         )
 
         const notesStartY = 33
+        const totalContentLines = notes.reduce((sum, note) => sum + String(note.text).split('\n').length, 0)
+        const boxHeight = Math.min(180, 18 + totalContentLines * 6 + notes.length * 3)
         pdf.setFillColor(254, 252, 246)
         pdf.setDrawColor(217, 130, 59)
         pdf.setLineWidth(0.8)
-        pdf.roundedRect(12, notesStartY, 273, Math.min(156, 18 + notes.length * 15), 2, 2, 'FD')
+        pdf.roundedRect(12, notesStartY, 273, boxHeight, 2, 2, 'FD')
 
         pdf.setTextColor(185, 106, 53)
         pdf.setFont('helvetica', 'bold')
         pdf.setFontSize(11)
         pdf.text(`TEAM OPERATIONAL NOTES & SHIFT INSTRUCTIONS (${notes.length})`, 16, notesStartY + 8.5)
 
-        pdf.setTextColor(45, 52, 58)
-        pdf.setFont('helvetica', 'bold')
-        pdf.setFontSize(9.5)
-        notes.forEach((note, nIdx) => {
+        let yCursor = notesStartY + 18
+        notes.forEach((note) => {
           const dateStr = note.createdAt ? formatPrintDate(note.createdAt) : ''
           const tag = `[${note.line === 'All production lines' ? 'Global' : note.line}]`
-          const yPos = notesStartY + 18 + nIdx * 14
+          const [headerLine, ...subLines] = String(note.text).split('\n')
+
           pdf.setTextColor(185, 106, 53)
           pdf.setFont('helvetica', 'bold')
           pdf.setFontSize(9)
-          pdf.text(`• ${tag}`, 16, yPos)
+          pdf.text(`• ${tag}`, 16, yCursor)
 
           pdf.setTextColor(45, 52, 58)
           pdf.setFont('helvetica', 'normal')
           pdf.setFontSize(9.5)
           const textOffset = 16 + pdf.getTextWidth(`• ${tag} `)
-          pdf.text(`${note.text}`, textOffset, yPos)
+          pdf.text(headerLine, textOffset, yCursor)
 
           if (dateStr) {
             pdf.setTextColor(125, 133, 140)
             pdf.setFontSize(8)
-            pdf.text(`(${dateStr})`, 250, yPos)
+            pdf.text(`(${dateStr})`, 250, yCursor)
           }
+
+          subLines.forEach((subLine) => {
+            yCursor += 6
+            pdf.setTextColor(70, 78, 85)
+            pdf.setFont('helvetica', 'normal')
+            pdf.setFontSize(9)
+            pdf.text(subLine, 22, yCursor)
+          })
+
+          yCursor += 9
         })
       }
     }
@@ -1132,6 +1146,10 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   const [newNoteLine, setNewNoteLine] = useState('Current line')
   const [editingNoteId, setEditingNoteId] = useState(null)
   const [editingNoteText, setEditingNoteText] = useState('')
+  const [noteInputMode, setNoteInputMode] = useState('text')
+  const [pdfExtracting, setPdfExtracting] = useState(false)
+  const [pdfError, setPdfError] = useState('')
+  const [pdfPreviewGroups, setPdfPreviewGroups] = useState([])
 
   useEffect(() => {
     try {
@@ -1163,6 +1181,40 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
 
   const handleDeleteNote = (id) => {
     setTeamNotes((prev) => prev.filter((n) => n.id !== id))
+  }
+
+  const handlePdfUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setPdfExtracting(true)
+    setPdfError('')
+    setPdfPreviewGroups([])
+    try {
+      const groups = await extractDmsNotesFromPdf(file)
+      setPdfPreviewGroups(groups)
+    } catch (extractError) {
+      setPdfError(extractError.message || 'Could not read the DMS board table from this PDF.')
+    } finally {
+      setPdfExtracting(false)
+      event.target.value = ''
+    }
+  }
+
+  const handleAddExtractedNotes = () => {
+    if (!pdfPreviewGroups.length) return
+    const createdNotes = pdfPreviewGroups.map((group, index) => ({
+      id: `note-${Date.now()}-${index}`,
+      text: `CHECK DMS BOARD TASKS\n${group.rows.map((row) => `- ${row.description}`).join('\n')}`,
+      line: machines.includes(group.machine) ? group.machine : 'All production lines',
+      createdAt: new Date().toISOString(),
+    }))
+    setTeamNotes((prev) => [...createdNotes, ...prev])
+    setPdfPreviewGroups([])
+  }
+
+  const handleDiscardPdfPreview = () => {
+    setPdfPreviewGroups([])
+    setPdfError('')
   }
 
   const handleStartEdit = (note) => {
@@ -1250,27 +1302,71 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
                 </select>
               </div>
             </div>
-            <div className="notes-input-row">
-              <textarea
-                className="notes-textarea"
-                placeholder="Type an operational note, shift handover, or priority instruction for the team..."
-                value={newNoteText}
-                onChange={(e) => setNewNoteText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                    handleAddNote(e)
-                  }
-                }}
-                rows={2}
-              />
-              <button
-                className="button button-primary add-note-submit-btn"
-                disabled={!newNoteText.trim()}
-                onClick={handleAddNote}
-              >
-                <Plus size={15} /> Add Note
+
+            <div className="notes-mode-toggle">
+              <button className={noteInputMode === 'text' ? 'active' : ''} onClick={() => setNoteInputMode('text')}>
+                <Pencil size={13} />Write text
+              </button>
+              <button className={noteInputMode === 'pdf' ? 'active' : ''} onClick={() => setNoteInputMode('pdf')}>
+                <FileText size={13} />Upload PDF (DMS Board)
               </button>
             </div>
+
+            {noteInputMode === 'text' ? (
+              <div className="notes-input-row">
+                <textarea
+                  className="notes-textarea"
+                  placeholder="Type an operational note, shift handover, or priority instruction for the team..."
+                  value={newNoteText}
+                  onChange={(e) => setNewNoteText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      handleAddNote(e)
+                    }
+                  }}
+                  rows={2}
+                />
+                <button
+                  className="button button-primary add-note-submit-btn"
+                  disabled={!newNoteText.trim()}
+                  onClick={handleAddNote}
+                >
+                  <Plus size={15} /> Add Note
+                </button>
+              </div>
+            ) : (
+              <div className="pdf-note-uploader">
+                <label className="button button-secondary upload-button pdf-upload-btn">
+                  <FileText size={15} />
+                  {pdfExtracting ? 'Reading PDF...' : 'Choose DMS Board PDF'}
+                  <input type="file" accept=".pdf" onChange={handlePdfUpload} disabled={pdfExtracting} />
+                </label>
+                <span className="pdf-upload-hint">Upload the DMS Dashboard Follow Up export — the Description column will be read automatically.</span>
+
+                {pdfError && <div className="upload-error"><AlertTriangle size={15} />{pdfError}</div>}
+
+                {pdfPreviewGroups.length > 0 && (
+                  <div className="pdf-preview-box">
+                    <div className="pdf-preview-heading">
+                      <strong>Extracted from PDF</strong>
+                      <span>Review before adding to Team Notes</span>
+                    </div>
+                    {pdfPreviewGroups.map((group) => (
+                      <div key={group.machine} className="pdf-preview-group">
+                        <span className="team-note-line-tag"><StickyNote size={12} />{group.machine || 'All production lines'}</span>
+                        <ul>
+                          {group.rows.map((row) => <li key={row.id}>{row.description}</li>)}
+                        </ul>
+                      </div>
+                    ))}
+                    <div className="pdf-preview-actions">
+                      <button className="button button-primary note-small-btn" onClick={handleAddExtractedNotes}><Plus size={13} />Add to Team Notes</button>
+                      <button className="button button-secondary note-small-btn" onClick={handleDiscardPdfPreview}>Discard</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {filteredNotes.length > 0 && (

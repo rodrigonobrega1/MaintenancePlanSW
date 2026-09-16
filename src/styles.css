@@ -120,7 +120,7 @@
 .note-delete-btn:hover { color: #be4b40 !important; background: #fae3e0 !important; }
 .note-save-btn { color: #2e7d4a; }
 .note-save-btn:hover { background: #e8f5ec; color: #2e7d4a; }
-.team-note-body { margin: 0; color: #38424a; font-size: 11.5px; line-height: 1.45; word-break: break-word; }
+.team-note-body { margin: 0; color: #38424a; font-size: 11.5px; line-height: 1.45; word-break: break-word; white-space: pre-wrap; }
 .team-note-inline-edit { display: grid; gap: 6px; }
 .team-note-inline-edit textarea { width: 100%; min-height: 48px; padding: 6px 8px; border: 1px solid #d9823b; border-radius: 4px; font: inherit; font-size: 11.5px; color: #2e353c; outline: none; }
 .team-note-edit-buttons { display: flex; gap: 6px; justify-content: flex-end; }
@@ -166,6 +166,22 @@
 .priority-task-actions { display: flex; align-items: center; gap: 6px; }
 .priority-task-actions .note-small-btn { height: 28px; padding: 0 10px; font-size: 10.5px; }
 .priority-dump-textarea { display: block; width: 100%; box-sizing: border-box; min-height: 220px; font-size: 13px; line-height: 1.55; padding: 16px 18px; }
+
+/* Team Notes: text vs PDF upload mode */
+.notes-mode-toggle { display: flex; gap: 6px; margin-bottom: 10px; }
+.notes-mode-toggle button { display: flex; align-items: center; gap: 6px; border: 1px solid #e0e3e6; border-radius: 6px; padding: 6px 11px; background: #fff; color: #69737b; font-size: 11px; font-weight: 600; transition: .15s ease; }
+.notes-mode-toggle button:hover { border-color: #d9823b; color: #b96a2f; }
+.notes-mode-toggle button.active { background: #d9823b; border-color: #d9823b; color: #fff; }
+.pdf-note-uploader { display: grid; gap: 8px; }
+.pdf-upload-btn input[type="file"] { display: none; }
+.pdf-upload-hint { color: #8a9299; font-size: 10.5px; line-height: 1.4; }
+.pdf-preview-box { display: grid; gap: 10px; padding: 12px 14px; background: #f8faf9; border: 1px solid #e0e6e3; border-radius: 8px; }
+.pdf-preview-heading { display: flex; align-items: baseline; justify-content: space-between; }
+.pdf-preview-heading strong { color: #2e353c; font-size: 12px; }
+.pdf-preview-heading span { color: #8a9299; font-size: 10.5px; }
+.pdf-preview-group { display: grid; gap: 4px; }
+.pdf-preview-group ul { margin: 0; padding-left: 20px; color: #38424a; font-size: 11.5px; line-height: 1.5; }
+.pdf-preview-actions { display: flex; gap: 8px; }
 .priority-category-section { margin-top: 8px; margin-bottom: 22px; }
 .priority-task-checkbox { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: #525d66; cursor: pointer; }
 .priority-task-checkbox input { width: 15px; height: 15px; accent-color: #2e7d4a; cursor: pointer; }
