@@ -15,6 +15,62 @@ const CATEGORIAS = [
   { chave: 'P3', titulo: '⚡ P3 - Rotina', tone: 'blue' },
 ]
 
+const PRIORITY_SCORE = { P1: 3, P2: 2, P3: 1 }
+
+function normalizarDia(date) {
+  const normalized = new Date(date)
+  normalized.setHours(0, 0, 0, 0)
+  return normalized
+}
+
+function parseDateMention(text) {
+  const content = text.toLowerCase()
+  const today = normalizarDia(new Date())
+  if (/\b(hoje|today)\b/.test(content)) return today
+  if (/\b(amanh[aã]|tomorrow)\b/.test(content)) { const date = new Date(today); date.setDate(date.getDate() + 1); return date }
+  if (/\b(essa semana|esta semana|this week)\b/.test(content)) { const date = new Date(today); date.setDate(date.getDate() + 5); return date }
+  if (/\b(proxima semana|pr[oó]xima semana|next week)\b/.test(content)) { const date = new Date(today); date.setDate(date.getDate() + 7); return date }
+
+  const isoMatch = content.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/)
+  if (isoMatch) return normalizarDia(new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3])))
+
+  const slashMatch = content.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/)
+  if (slashMatch) {
+    const year = slashMatch[3] ? Number(String(slashMatch[3]).padStart(4, '20')) : today.getFullYear()
+    return normalizarDia(new Date(year, Number(slashMatch[2]) - 1, Number(slashMatch[1])))
+  }
+
+  const weekdays = [
+    ['domingo', 'sunday'], ['segunda', 'monday'], ['terca', 'terça', 'tuesday'], ['quarta', 'wednesday'],
+    ['quinta', 'thursday'], ['sexta', 'friday'], ['sabado', 'sábado', 'saturday'],
+  ]
+  const weekdayIndex = weekdays.findIndex((names) => names.some((name) => content.includes(name)))
+  if (weekdayIndex >= 0) {
+    const date = new Date(today)
+    const diff = (weekdayIndex - today.getDay() + 7) % 7
+    date.setDate(today.getDate() + diff)
+    return date
+  }
+  return null
+}
+
+function priorityFromDate(task) {
+  const dueDate = parseDateMention(`${task.titulo || ''} ${task.acao || ''}`)
+  const daysOverdue = calcularDiasAtraso(task.dataCriacao)
+  if (dueDate) {
+    const daysUntil = Math.floor((dueDate - normalizarDia(new Date())) / 86400000)
+    if (daysUntil <= 2) return 'P1'
+    if (daysUntil <= 7) return 'P2'
+  }
+  if (daysOverdue >= 7) return 'P1'
+  if (daysOverdue >= 3) return 'P2'
+  return task.prioridade
+}
+
+function highestPriority(current, suggested) {
+  return PRIORITY_SCORE[suggested] > PRIORITY_SCORE[current] ? suggested : current
+}
+
 function carregarTarefas() {
   try {
     const salvas = JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY) || '[]')
@@ -43,6 +99,7 @@ export default function BrainDumpPrioritizer() {
   const [authPassword, setAuthPassword] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [cloudLoaded, setCloudLoaded] = useState(false)
+  const [draggingTaskId, setDraggingTaskId] = useState(null)
 
   useEffect(() => {
     if (!supabase) return undefined
@@ -128,6 +185,24 @@ export default function BrainDumpPrioritizer() {
 
   const editarTarefa = (id, changes) => {
     setTarefas((atual) => atual.map((tarefa) => tarefa.id === id ? { ...tarefa, ...changes } : tarefa))
+  }
+
+  const atualizarAvaliacao = () => {
+    let updated = 0
+    setTarefas((atual) => atual.map((tarefa) => {
+      if (tarefa.status !== 'pendente') return tarefa
+      const nextPriority = highestPriority(tarefa.prioridade, priorityFromDate(tarefa))
+      if (nextPriority === tarefa.prioridade) return tarefa
+      updated += 1
+      return { ...tarefa, prioridade: nextPriority }
+    }))
+    setMensagem(updated ? `Avaliação atualizada · ${updated} tarefa${updated === 1 ? '' : 's'} mudou/mudaram de prioridade` : 'Avaliação atualizada · nenhuma prioridade precisou mudar')
+  }
+
+  const moverTarefaParaCategoria = (id, prioridade) => {
+    editarTarefa(id, { prioridade })
+    setDraggingTaskId(null)
+    setMensagem(`Tarefa movida para ${prioridade}.`)
   }
 
   const handleSalvarApiKey = () => {
@@ -252,6 +327,9 @@ export default function BrainDumpPrioritizer() {
           placeholder="Ex.: A auditoria de segurança está travando o restart da linha. Preciso ligar para a manutenção, revisar a permissão em aberto e enviar o checklist atualizado até sexta."
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+          <button className="button button-secondary" style={{ marginRight: 8 }} disabled={!pendentes.length} onClick={atualizarAvaliacao}>
+            <Sparkles size={15} />Atualizar avaliação
+          </button>
           <button className="button button-primary" disabled={!brainDump.trim() || carregando} onClick={handleAnalisar}>
             {carregando ? <LoaderCircle size={15} className="spin" /> : <Zap size={15} />}
             {carregando ? 'Analisando...' : '🤖 Analisar e Priorizar com IA'}
@@ -264,14 +342,19 @@ export default function BrainDumpPrioritizer() {
           .filter((tarefa) => tarefa.prioridade === chave)
           .sort((a, b) => calcularDiasAtraso(b.dataCriacao) - calcularDiasAtraso(a.dataCriacao))
         return (
-          <section key={chave} className="priority-category-section">
+          <section
+            key={chave}
+            className={`priority-category-section ${draggingTaskId ? 'priority-drop-ready' : ''}`}
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}
+            onDrop={() => draggingTaskId && moverTarefaParaCategoria(draggingTaskId, chave)}
+          >
             <div className="dashboard-section-heading">
               <div><span className="section-kicker">Categoria</span><h2>{titulo}</h2></div>
               <span className="scope-count">{tarefasCategoria.length}</span>
             </div>
             <div className="maintenance-plan-cards priority-task-cards">
               {tarefasCategoria.map((tarefa) => (
-                <TarefaCard key={tarefa.id} tarefa={tarefa} tone={tone} onConcluir={marcarConcluida} onDeletar={deletarTarefa} onEditar={editarTarefa} />
+                <TarefaCard key={tarefa.id} tarefa={tarefa} tone={tone} onConcluir={marcarConcluida} onDeletar={deletarTarefa} onEditar={editarTarefa} onDragStart={setDraggingTaskId} onDragEnd={() => setDraggingTaskId(null)} />
               ))}
               {!tarefasCategoria.length && <div className="empty-dashboard">Nenhuma tarefa nesta categoria.</div>}
             </div>
@@ -295,7 +378,7 @@ export default function BrainDumpPrioritizer() {
   )
 }
 
-function TarefaCard({ tarefa, tone, onConcluir, onReabrir, onDeletar, onEditar }) {
+function TarefaCard({ tarefa, tone, onConcluir, onReabrir, onDeletar, onEditar, onDragStart, onDragEnd }) {
   const [editando, setEditando] = useState(false)
   const [titulo, setTitulo] = useState(tarefa.titulo)
   const [acao, setAcao] = useState(tarefa.acao)
@@ -318,7 +401,12 @@ function TarefaCard({ tarefa, tone, onConcluir, onReabrir, onDeletar, onEditar }
   }
 
   return (
-    <article className={`maintenance-plan-card priority-task-card card-${stateTone}`}>
+    <article
+      className={`maintenance-plan-card priority-task-card card-${stateTone}`}
+      draggable={!concluida && !editando}
+      onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; onDragStart?.(tarefa.id) }}
+      onDragEnd={onDragEnd}
+    >
       <div className="plan-card-top">
         <label className="priority-task-checkbox">
           <input
@@ -348,6 +436,7 @@ function TarefaCard({ tarefa, tone, onConcluir, onReabrir, onDeletar, onEditar }
       </div>
       {diasAtraso > 0 && <div className="delay-badge"><AlertTriangle size={13} />⚠️ {diasAtraso} dia{diasAtraso === 1 ? '' : 's'} em atraso</div>}
       <div className="priority-task-footer no-print">
+        {!concluida && !editando && <span className="drag-hint">Drag to move priority</span>}
         <div className="priority-task-actions">
           {!editando && <button className="icon-button note-action-btn note-edit-btn" onClick={iniciarEdicao} aria-label="Editar tarefa" title="Editar tarefa"><Pencil size={13} /></button>}
           <button className="icon-button note-action-btn note-delete-btn" onClick={() => onDeletar(tarefa.id)} aria-label="Excluir tarefa" title="Excluir tarefa">

@@ -163,7 +163,10 @@
 .priority-tabs button.active { background: #d9823b; border-color: #d9823b; color: #fff; }
 .priority-task-cards { margin-bottom: 6px; }
 .priority-task-card { display: flex; flex-direction: column; }
+.priority-task-card[draggable="true"] { cursor: grab; }
+.priority-task-card[draggable="true"]:active { cursor: grabbing; }
 .priority-task-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #eef0f1; }
+.drag-hint { color: #9ba2a8; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
 .repeat-tag { color: #8a9299; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
 .priority-task-actions { display: flex; align-items: center; gap: 6px; }
 .priority-task-actions .note-small-btn { height: 28px; padding: 0 10px; font-size: 10.5px; }
@@ -237,6 +240,8 @@
 .multi-machine-option input { accent-color: #d9823b; }
 .select-all-option { border-bottom: 1px solid #edf0f0; margin-bottom: 3px; font-weight: 700; }
 .priority-category-section { margin-top: 8px; margin-bottom: 22px; }
+.priority-category-section.priority-drop-ready { border-radius: 8px; outline: 1px dashed #d9823b66; outline-offset: 6px; }
+.priority-category-section.priority-drop-ready .dashboard-section-heading { padding: 8px 10px; border-radius: 7px; background: #fff8f1; }
 .priority-task-checkbox { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: #525d66; cursor: pointer; }
 .priority-task-checkbox input { width: 15px; height: 15px; accent-color: #2e7d4a; cursor: pointer; }
 .spin { animation: report-spin .8s linear infinite; }
