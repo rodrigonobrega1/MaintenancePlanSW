@@ -180,11 +180,18 @@ function exportDmsWeeklyPdf(rows, notes) {
   const overall = summaryFor(rows)
   drawHeader('DMS Board Weekly Report — Summary', `${rows.length} activities across ${machines.length} production lines · Issued ${new Date().toLocaleDateString('en-GB')}`)
   drawKpis(overall, 32)
-  pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('OVERALL PERFORMANCE', 12, 66)
-  pdf.setTextColor(45, 52, 58); pdf.setFontSize(12); pdf.text('All production lines', 12, 74)
-  drawStatusBar(pdf, 95, 65, 190, overall)
 
-  let cursorY = 92
+  // Overall performance card: rounded panel with an accent rail, visually separated from the per-line rows below.
+  const overallCardY = 60; const overallCardHeight = 32
+  pdf.setFillColor(250, 248, 245); pdf.setDrawColor(217, 130, 59); pdf.setLineWidth(1.4)
+  pdf.line(12, overallCardY, 12, overallCardY + overallCardHeight)
+  pdf.setFillColor(250, 249, 246); pdf.setDrawColor(232, 224, 213); pdf.setLineWidth(.5)
+  pdf.roundedRect(13.5, overallCardY, 271.5, overallCardHeight, 2, 2, 'FD')
+  pdf.setTextColor(185, 106, 53); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('OVERALL PERFORMANCE', 20, overallCardY + 10)
+  pdf.setTextColor(45, 52, 58); pdf.setFontSize(13); pdf.text('All production lines', 20, overallCardY + 20)
+  drawStatusBar(pdf, 100, overallCardY + 9, 180, overall)
+
+  let cursorY = overallCardY + overallCardHeight + 16
   const rowHeight = 24
   machines.forEach((machine) => {
     if (cursorY + rowHeight > 195) {
