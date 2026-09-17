@@ -145,8 +145,10 @@ function exportDmsWeeklyPdf(rows, notes) {
     })
   }
   // Full-width feedback panel, matching the on-screen "Priorities & feedback" box.
+  // The card grows to fit the note: no character/line limit is applied to the text.
   const drawPrioritiesBox = (note, y) => {
-    const lines = pdf.splitTextToSize(note, 261)
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9)
+    const lines = pdf.splitTextToSize(note, 258)
     const boxHeight = 15 + lines.length * 5
     pdf.setFillColor(250, 248, 245); pdf.setDrawColor(217, 130, 59); pdf.setLineWidth(1.2)
     pdf.line(12, y, 12, y + boxHeight)
