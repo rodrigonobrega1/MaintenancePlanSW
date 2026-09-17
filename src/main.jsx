@@ -220,18 +220,22 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11.5); pdf.text('TOP 10 CRITICAL PLANS', 12, cursor - 6)
 
     pdf.setFillColor(239, 241, 244); pdf.rect(12, cursor, 273, 8, 'F')
-    pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7)
-    pdf.text('Rank', 15, cursor + 5.5); pdf.text('Plan Code / Tag', 30, cursor + 5.5); pdf.text('Activity / Maintenance Task', 65, cursor + 5.5); pdf.text('Frequency', 170, cursor + 5.5); pdf.text('Overdue Status', 205, cursor + 5.5); pdf.text('Severity', 260, cursor + 5.5)
+    pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5)
+    pdf.text('Rank', 15, cursor + 5.5); pdf.text('Activity / Plan', 28, cursor + 5.5); pdf.text('Machine / Frequency', 108, cursor + 5.5); pdf.text('Execution', 145, cursor + 5.5); pdf.text('Next Planned', 176, cursor + 5.5); pdf.text('Orders', 207, cursor + 5.5); pdf.text('Completion', 234, cursor + 5.5); pdf.text('Status', 263, cursor + 5.5)
     summary.topTasks.forEach((plan, taskIndex) => {
       const y = cursor + 15 + taskIndex * 9
       const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'
       pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2.6, 285, y + 2.6)
-      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.6); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
-      pdf.setTextColor(45, 52, 58); pdf.text(plan.planCode.slice(0, 18), 30, y)
-      pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 52), 65, y)
-      pdf.setFont('helvetica', 'normal'); pdf.text(plan.frequency, 170, y)
-      pdf.setTextColor(...severityColors[severityLabel]); pdf.text(plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : 'On track', 205, y)
-      pdf.setFont('helvetica', 'bold'); pdf.text(severityLabel, 260, y)
+      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.8); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
+      pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 43), 28, y - 1)
+      pdf.setTextColor(130, 138, 145); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(5.7); pdf.text(plan.planCode.slice(0, 20), 28, y + 2.2)
+      pdf.setTextColor(90, 98, 105); pdf.setFontSize(6.2); pdf.text(plan.machine.slice(0, 17), 108, y - 1); pdf.setFontSize(5.7); pdf.text(plan.frequency, 108, y + 2.2)
+      pdf.setFontSize(6.2); pdf.text(plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed', 145, y)
+      pdf.text(plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned', 176, y)
+      pdf.text(`${plan.completedOrders}/${plan.totalOrders}`, 207, y)
+      pdf.text(`${plan.completionRate}%`, 234, y)
+      pdf.setTextColor(...severityColors[severityLabel]); pdf.setFont('helvetica', 'bold'); pdf.text(severityLabel, 263, y - 1)
+      pdf.setFontSize(5.5); pdf.text(plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : '', 263, y + 2.2)
     })
     drawFooter()
   })
@@ -407,17 +411,18 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
   }
 
   // --- Full List of ALL Plans for the Selected Line ---
-  const rowsPerPage = 15
+  const rowsPerPage = 14
   const totalListPages = Math.ceil(ordered.length / rowsPerPage) || 1
 
   const tableColumns = [
     { label: 'Rank', x: 15 },
-    { label: 'Activity / Maintenance Task', x: 30 },
-    { label: 'Machine / Tag', x: 130 },
-    { label: 'Frequency', x: 172 },
-    { label: 'Plan Code', x: 196 },
-    { label: 'Due Date / Overdue Status', x: 226 },
-    { label: 'Severity', x: 268 },
+    { label: 'Activity / Plan', x: 28 },
+    { label: 'Machine / Frequency', x: 108 },
+    { label: 'Execution', x: 145 },
+    { label: 'Next Planned', x: 176 },
+    { label: 'Orders', x: 207 },
+    { label: 'Completion', x: 234 },
+    { label: 'Status', x: 263 },
   ]
 
   for (let p = 0; p < totalListPages; p++) {
@@ -439,13 +444,13 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
     const pagePlans = ordered.slice(p * rowsPerPage, (p + 1) * rowsPerPage)
     pagePlans.forEach((plan, idx) => {
       const overallIndex = p * rowsPerPage + idx
-      const rowY = listStart + 13 + idx * 8.5
+      const rowY = listStart + 13 + idx * 10
       const color = statusColor(plan)
       const isOverdue = plan.daysOverdue > 0
 
       pdf.setDrawColor(235, 238, 240)
       pdf.setLineWidth(0.4)
-      pdf.line(12, rowY + 2.5, 285, rowY + 2.5)
+      pdf.line(12, rowY + 3.5, 285, rowY + 3.5)
 
       pdf.setTextColor(145, 151, 157)
       pdf.setFont('helvetica', 'normal')
@@ -454,28 +459,28 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
 
       pdf.setTextColor(45, 52, 58)
       pdf.setFont('helvetica', 'bold')
-      pdf.text(plan.activity.slice(0, 56), 30, rowY)
+      pdf.text(plan.activity.slice(0, 43), 28, rowY - 1)
+      pdf.setTextColor(130, 138, 145)
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(6)
+      pdf.text(plan.planCode.slice(0, 20), 28, rowY + 2.5)
 
       pdf.setTextColor(100, 108, 115)
       pdf.setFont('helvetica', 'normal')
-      pdf.text(plan.machine.slice(0, 22), 130, rowY)
-      pdf.text(plan.frequency, 172, rowY)
-      pdf.text(plan.planCode.slice(0, 15), 196, rowY)
-
-      if (isOverdue) {
-        pdf.setTextColor(...color)
-        pdf.setFont('helvetica', 'bold')
-        pdf.text(`${plan.daysOverdue}d overdue (${plan.nextDue ? formatPrintDate(plan.nextDue) : 'No date'})`.slice(0, 28), 226, rowY)
-      } else {
-        pdf.setTextColor(100, 108, 115)
-        pdf.setFont('helvetica', 'normal')
-        pdf.text(plan.nextDue ? `Due ${formatPrintDate(plan.nextDue)}` : 'To be planned', 226, rowY)
-      }
-
-      pdf.setTextColor(...color)
-      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(6.5)
+      pdf.text(plan.machine.slice(0, 17), 108, rowY - 1)
+      pdf.setFontSize(6)
+      pdf.text(plan.frequency, 108, rowY + 2.5)
+      pdf.setFontSize(6.5)
+      pdf.text(plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed', 145, rowY)
+      pdf.text(plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned', 176, rowY)
+      pdf.text(`${plan.completedOrders}/${plan.totalOrders}`, 207, rowY)
+      pdf.text(`${plan.completionRate}%`, 234, rowY)
+      pdf.setTextColor(...color); pdf.setFont('helvetica', 'bold')
       const sevLabel = isOverdue ? (plan.daysOverdue > 30 ? 'Critical' : 'Overdue') : (plan.criticality === 'Due soon' ? 'Due soon' : 'On track')
-      pdf.text(sevLabel, 268, rowY)
+      pdf.text(sevLabel, 263, rowY - 1)
+      pdf.setFontSize(5.8)
+      pdf.text(isOverdue ? `${plan.daysOverdue}d overdue` : '', 263, rowY + 2.5)
     })
 
     // If on the last page, render notes as a plain wrapped list. Every line is checked
@@ -484,7 +489,7 @@ function exportPlanDashboardPdf({ plans, line, notes = [], shutdownDate = '' }) 
     if (p === totalListPages - 1 && notes && notes.length > 0) {
       const contentWidth = 273
       const bottomLimit = 198
-      const lastRowY = listStart + 13 + pagePlans.length * 8.5
+      const lastRowY = listStart + 13 + pagePlans.length * 10
       let y = Math.max(lastRowY + 8, 140)
       let isFirstNotesPage = true
 
