@@ -125,7 +125,6 @@ function exportDmsWeeklyPdf(rows, notes) {
   const drawHeader = (title, subtitle) => {
     pdf.setTextColor(37, 40, 45); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(17); pdf.text(title, 12, 15)
     pdf.setTextColor(110, 118, 125); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(subtitle, 12, 22)
-    pdf.setDrawColor(217, 130, 59); pdf.setLineWidth(.7); pdf.line(12, 26, 285, 26)
   }
   const drawFooter = () => {
     pdf.setTextColor(145, 151, 157); pdf.setFontSize(7)
@@ -160,7 +159,7 @@ function exportDmsWeeklyPdf(rows, notes) {
   }
   // Activity table matching the on-screen column order for a single production line.
   const drawTable = (items, startY) => {
-    const headers = [['Status', 14], ['Activity', 44], ['Date added', 170], ['Days open', 198], ['Fix / Engineering notes', 222], ['H&S', 268], ['Engineer', 278]]
+    const headers = [['Status', 14], ['Activity', 44], ['Date added', 170], ['Days open', 198], ['Fix / Engineering notes', 222], ['H&S', 268], ['ENG', 278]]
     pdf.setFillColor(239, 241, 244); pdf.rect(12, startY, 273, 8, 'F')
     pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5)
     headers.forEach(([label, x]) => pdf.text(label, x, startY + 5.5))
@@ -177,7 +176,35 @@ function exportDmsWeeklyPdf(rows, notes) {
     })
   }
 
-  // --- Production-line pages first: header, priorities & feedback, activity table ---
+  // --- Summary pages first: scorecards, then overall and per-line distribution charts ---
+  const overall = summaryFor(rows)
+  drawHeader('DMS Board Weekly Report — Summary', `${rows.length} activities across ${machines.length} production lines · Issued ${new Date().toLocaleDateString('en-GB')}`)
+  drawKpis(overall, 32)
+  pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('OVERALL PERFORMANCE', 12, 66)
+  pdf.setTextColor(45, 52, 58); pdf.setFontSize(12); pdf.text('All production lines', 12, 74)
+  drawStatusBar(pdf, 95, 65, 190, overall)
+
+  let cursorY = 92
+  const rowHeight = 24
+  machines.forEach((machine) => {
+    if (cursorY + rowHeight > 195) {
+      drawFooter()
+      pdf.addPage()
+      drawHeader('DMS Board Weekly Report — Summary', `${rows.length} activities across ${machines.length} production lines`)
+      cursorY = 34
+    }
+    const summary = summaryFor(rows.filter((row) => row.machine === machine))
+    pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('PRODUCTION LINE', 12, cursorY - 6)
+    pdf.setTextColor(45, 52, 58); pdf.setFontSize(11); pdf.text(machine, 12, cursorY + 1)
+    pdf.setTextColor(110, 118, 125); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7)
+    pdf.text(`${summary.total} actions · ${summary.completionRate}% completed · ${summary.avgDaysOpen} average days open`, 12, cursorY + 7)
+    drawStatusBar(pdf, 95, cursorY - 7, 190, summary)
+    pdf.setDrawColor(238, 240, 241); pdf.setLineWidth(.3); pdf.line(12, cursorY + 12, 285, cursorY + 12)
+    cursorY += rowHeight
+  })
+  drawFooter()
+
+  // --- Production-line pages next: header, priorities & feedback, activity table ---
   machines.forEach((machine) => {
     const machineRows = sortRows(rows.filter((row) => row.machine === machine))
     const summary = summaryFor(machineRows)
@@ -197,35 +224,6 @@ function exportDmsWeeklyPdf(rows, notes) {
       drawFooter()
     }
   })
-
-  // --- Summary pages last: scorecards, then overall and per-line distribution charts ---
-  const overall = summaryFor(rows)
-  pdf.addPage()
-  drawHeader('DMS Board Weekly Report — Summary', `${rows.length} activities across ${machines.length} production lines · Issued ${new Date().toLocaleDateString('en-GB')}`)
-  drawKpis(overall, 32)
-  pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('OVERALL PERFORMANCE', 12, 66)
-  pdf.setTextColor(45, 52, 58); pdf.setFontSize(12); pdf.text('All production lines', 12, 74)
-  drawStatusBar(pdf, 95, 65, 190, overall)
-
-  let cursorY = 92
-  const rowHeight = 24
-  machines.forEach((machine) => {
-    if (cursorY + rowHeight > 195) {
-      drawFooter()
-      pdf.addPage()
-      drawHeader('DMS Board Weekly Report — Summary (continued)', `${rows.length} activities across ${machines.length} production lines`)
-      cursorY = 34
-    }
-    const summary = summaryFor(rows.filter((row) => row.machine === machine))
-    pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('PRODUCTION LINE', 12, cursorY - 6)
-    pdf.setTextColor(45, 52, 58); pdf.setFontSize(11); pdf.text(machine, 12, cursorY + 1)
-    pdf.setTextColor(110, 118, 125); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7)
-    pdf.text(`${summary.total} actions · ${summary.completionRate}% completed · ${summary.avgDaysOpen} average days open`, 12, cursorY + 7)
-    drawStatusBar(pdf, 95, cursorY - 7, 190, summary)
-    pdf.setDrawColor(238, 240, 241); pdf.setLineWidth(.3); pdf.line(12, cursorY + 12, 285, cursorY + 12)
-    cursorY += rowHeight
-  })
-  drawFooter()
 
   pdf.putTotalPages(pageToken)
   pdf.save('dms-board-weekly-report.pdf')
