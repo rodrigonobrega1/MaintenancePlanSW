@@ -247,25 +247,28 @@ export default function BrainDumpPrioritizer() {
       )}
       <div className="plan-dashboard-head">
         <div>
-          <div className="eyebrow">Priorização diária com IA</div>
-          <h1>Brain Dump &amp; Priorização</h1>
-          <p>Descarregue suas ideias e deixe a IA organizar o que é urgente, importante e rotina.</p>
+          <div className="eyebrow">Company memory platform</div>
+          <h1>AKD</h1>
+          <p>Professional Project Prioritization</p>
         </div>
-        <div className="intro-actions no-print">
-          <button className="button button-secondary" onClick={() => setShowApiKeyPanel((current) => !current)}>
-            <KeyRound size={15} />{apiKey ? 'Chave OpenRouter configurada' : 'Configurar chave OpenRouter'}
+        <div className="intro-actions priority-header-actions no-print">
+          <button className="button button-secondary" disabled={!pendentes.length} onClick={atualizarAvaliacao}>
+            <Sparkles size={15} />Update assessment
           </button>
+          <button className="button button-secondary" onClick={() => setShowApiKeyPanel((current) => !current)}>
+            <KeyRound size={15} />{apiKey ? 'API configured' : 'Configure API'}
+          </button>
+          {session && <><span className="account-label">{session.user.email}</span><button className="button button-secondary" onClick={() => supabase.auth.signOut()}>Sign out</button></>}
         </div>
-        {session && <div className="intro-actions no-print"><span className="account-label">{session.user.email}</span><button className="button button-secondary" onClick={() => supabase.auth.signOut()}>Sign out</button></div>}
       </div>
 
-      <div className="plan-source-strip">
+      <div className="priority-ai-status">
         <div className="file-icon">AI</div>
         <div>
           <strong>{apiKey ? 'OpenRouter · openrouter/free' : 'Parser local (sem chave configurada)'}</strong>
           <span>{mensagem}</span>
         </div>
-        <span className="live-pill"><i />{apiKey ? 'IA' : 'Local'}</span>
+        <span className="live-pill"><i />{apiKey ? 'AI active' : 'Local'}</span>
       </div>
 
       {showApiKeyPanel && (
@@ -327,9 +330,6 @@ export default function BrainDumpPrioritizer() {
           placeholder="Ex.: A auditoria de segurança está travando o restart da linha. Preciso ligar para a manutenção, revisar a permissão em aberto e enviar o checklist atualizado até sexta."
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-          <button className="button button-secondary" style={{ marginRight: 8 }} disabled={!pendentes.length} onClick={atualizarAvaliacao}>
-            <Sparkles size={15} />Atualizar avaliação
-          </button>
           <button className="button button-primary" disabled={!brainDump.trim() || carregando} onClick={handleAnalisar}>
             {carregando ? <LoaderCircle size={15} className="spin" /> : <Zap size={15} />}
             {carregando ? 'Analisando...' : '🤖 Analisar e Priorizar com IA'}
