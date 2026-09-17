@@ -113,6 +113,95 @@ function drawStatusBar(pdf, x, y, width, summary) {
   parts.forEach(([label, count], index) => pdf.text(`${label}: ${count}`, x + index * 38, y + 13))
 }
 
+const STATUS_ORDER_LEGEND = [
+  ['Completed', [46, 125, 74]],
+  ['Not Started', [189, 103, 92]],
+  ['Parts Requested', [217, 130, 59]],
+  ['Started', [77, 127, 209]],
+]
+
+function statusCounts(summary) {
+  return { Completed: summary.completed, 'Not Started': summary.notStarted, 'Parts Requested': summary.partsRequested, Started: summary.started }
+}
+
+// Draws a ring/donut chart made of many short colored strokes (jsPDF has no native arc primitive).
+function drawPdfRingChart(pdf, cx, cy, radius, lineWidth, summary) {
+  const counts = statusCounts(summary)
+  const total = summary.total || 1
+  let angle = -90
+  pdf.setLineWidth(lineWidth)
+  STATUS_ORDER_LEGEND.forEach(([label, color]) => {
+    const count = counts[label] || 0
+    if (!count) return
+    const sweep = (count / total) * 360
+    const steps = Math.max(1, Math.round(sweep / 4))
+    for (let step = 0; step < steps; step += 1) {
+      const a0 = (angle + (sweep * step) / steps) * Math.PI / 180
+      const a1 = (angle + (sweep * (step + 1)) / steps) * Math.PI / 180
+      pdf.setDrawColor(...color)
+      pdf.line(cx + Math.cos(a0) * radius, cy + Math.sin(a0) * radius, cx + Math.cos(a1) * radius, cy + Math.sin(a1) * radius)
+    }
+    angle += sweep
+  })
+  pdf.setLineWidth(.2)
+}
+
+// Draws a semicircular completion gauge (0% on the left, 100% on the right).
+function drawPdfGauge(pdf, cx, cy, radius, lineWidth, percentage) {
+  const steps = 48
+  const filledSteps = Math.round((percentage / 100) * steps)
+  pdf.setLineWidth(lineWidth)
+  for (let step = 0; step < steps; step += 1) {
+    const a0 = (180 - (180 * step) / steps) * Math.PI / 180
+    const a1 = (180 - (180 * (step + 1)) / steps) * Math.PI / 180
+    pdf.setDrawColor(...(step < filledSteps ? [77, 127, 209] : [227, 230, 233]))
+    pdf.line(cx + Math.cos(a0) * radius, cy + Math.sin(a0) * radius, cx + Math.cos(a1) * radius, cy + Math.sin(a1) * radius)
+  }
+  pdf.setLineWidth(.2)
+  pdf.setTextColor(150, 157, 163); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(5.6)
+  pdf.text('0.0%', cx - radius - 1, cy + 5)
+  pdf.text('100.0%', cx + radius - 7, cy + 5)
+  pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9)
+  const label = `${percentage}%`
+  pdf.text(label, cx - pdf.getTextWidth(label) / 2, cy - 1)
+}
+
+// Renders one Power BI-style scorecard: donut + legend on the left, completion gauge on the right.
+function drawDmsCard(pdf, x, y, width, height, title, summary) {
+  pdf.setFillColor(249, 250, 251); pdf.setDrawColor(228, 231, 234); pdf.setLineWidth(.4)
+  pdf.roundedRect(x, y, width, height, 2, 2, 'FD')
+  pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text(title, x + 6, y + 9)
+
+  const dividerX = x + width * 0.6
+  pdf.setDrawColor(232, 235, 237); pdf.setLineWidth(.3); pdf.line(dividerX, y + 6, dividerX, y + height - 5)
+
+  pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(5.6)
+  pdf.text('ACTION DISTRIBUTION', x + 6, y + 15)
+  pdf.text('BY STATUS', x + 6, y + 19)
+
+  const donutRadius = Math.min(13, height / 4.4)
+  const donutCx = x + 17; const donutCy = y + height / 2 + 4
+  drawPdfRingChart(pdf, donutCx, donutCy, donutRadius, 5, summary)
+  pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11)
+  const totalLabel = String(summary.total)
+  pdf.text(totalLabel, donutCx - pdf.getTextWidth(totalLabel) / 2, donutCy + 1.5)
+
+  const counts = statusCounts(summary)
+  let legendY = donutCy - donutRadius + 2
+  STATUS_ORDER_LEGEND.forEach(([label, color]) => {
+    const count = counts[label] || 0
+    if (!count) return
+    pdf.setFillColor(...color); pdf.circle(donutCx + donutRadius + 6, legendY - 1, 1, 'F')
+    pdf.setTextColor(80, 88, 95); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6)
+    pdf.text(`${label} ${count}`, donutCx + donutRadius + 9, legendY)
+    legendY += 5.4
+  })
+
+  pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(5.6)
+  pdf.text('COMPLETION RATE', dividerX + 6, y + 15)
+  drawPdfGauge(pdf, dividerX + (width - (dividerX - x)) / 2, y + height / 2 + 6, Math.min(12, (width - (dividerX - x)) / 2 - 8), 4.4, summary.completionRate)
+}
+
 function exportDmsWeeklyPdf(rows, notes) {
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const machines = [...new Set(rows.map((row) => row.machine))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
@@ -158,20 +247,40 @@ function exportDmsWeeklyPdf(rows, notes) {
   }
 
   const overall = summaryFor(rows)
-  drawHeader('DMS Board Weekly Report', `${rows.length} activities across ${machines.length} production lines · Issued ${new Date().toLocaleDateString('en-GB')}`)
-  drawKpis(overall, 32)
-  pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text('Overall action distribution', 12, 64)
-  drawStatusBar(pdf, 12, 70, 160, overall)
-  let y = 96
-  machines.slice(0, 5).forEach((machine) => {
-    const machineRows = rows.filter((row) => row.machine === machine)
-    const summary = summaryFor(machineRows)
-    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text(machine, 12, y)
-    drawStatusBar(pdf, 45, y - 5, 110, summary)
-    pdf.setTextColor(110, 118, 125); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`${summary.total} actions · ${summary.completionRate}% complete · ${summary.avgDaysOpen} avg days open`, 170, y)
-    y += 19
-  })
-  drawFooter()
+  const cardsData = [
+    ...machines.map((machine) => ({ title: machine, summary: summaryFor(rows.filter((row) => row.machine === machine)) })),
+    { title: 'ALL', summary: overall },
+  ]
+  const cols = 3
+  const cardGap = 6
+  const cardWidth = (273 - cardGap * (cols - 1)) / cols
+  const cardHeight = 54
+  const rowsPerPage = 2
+  let cardIndex = 0
+  let firstOverviewPage = true
+  while (cardIndex < cardsData.length) {
+    if (!firstOverviewPage) pdf.addPage()
+    drawHeader(
+      firstOverviewPage ? 'DMS Board Weekly Report' : 'DMS Board Weekly Report (continued)',
+      `${rows.length} activities across ${machines.length} production lines · Issued ${new Date().toLocaleDateString('en-GB')}`
+    )
+    const gridStartY = firstOverviewPage ? 68 : 34
+    if (firstOverviewPage) drawKpis(overall, 32)
+    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11)
+    pdf.text(firstOverviewPage ? 'Action distribution by production line' : 'Action distribution by production line (continued)', 12, gridStartY - 6)
+
+    const pageCards = cardsData.slice(cardIndex, cardIndex + rowsPerPage * cols)
+    pageCards.forEach((card, index) => {
+      const col = index % cols
+      const row = Math.floor(index / cols)
+      const x = 12 + col * (cardWidth + cardGap)
+      const y = gridStartY + row * (cardHeight + cardGap)
+      drawDmsCard(pdf, x, y, cardWidth, cardHeight, card.title, card.summary)
+    })
+    cardIndex += pageCards.length
+    firstOverviewPage = false
+    drawFooter()
+  }
 
   machines.forEach((machine) => {
     const machineRows = sortRows(rows.filter((row) => row.machine === machine))
