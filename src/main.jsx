@@ -1126,22 +1126,50 @@ function reconcilePlansWithExecution(plans, executionRows) {
     return groups
   }, new Map())
   const today = new Date()
+  const currentYear = today.getFullYear()
+  const startOfYear = new Date(currentYear, 0, 1)
+  const endOfYear = new Date(currentYear + 1, 0, 1)
+  const oneDay = 86400000
 
   return plans.map((plan) => {
-    const actualRows = rowsByPlan.get(plan.planCode)
-    if (!actualRows?.length) return { ...plan, executionMatched: false }
+    const plannedCalls = (plan.calls || [])
+      .filter((call) => call.scheduledDate && call.scheduledDate >= startOfYear && call.scheduledDate < endOfYear)
+      .sort((a, b) => a.scheduledDate - b.scheduledDate)
+    if (!plannedCalls.length) return { ...plan, executionMatched: false }
 
-    const completedRows = actualRows.filter((row) => row.completed)
-    const openRows = actualRows.filter((row) => !row.completed)
-    const completedDates = completedRows.map((row) => row.completionDate).filter(Boolean).sort((a, b) => b - a)
-    const openDates = openRows.map((row) => row.scheduledDate).filter(Boolean).sort((a, b) => a - b)
+    const actualRows = (rowsByPlan.get(plan.planCode) || [])
+      .filter((row) => row.scheduledDate && row.scheduledDate >= startOfYear && row.scheduledDate < endOfYear)
+    const unusedRows = new Set(actualRows.map((_, index) => index))
+    const reconciledCalls = plannedCalls.map((call) => {
+      let matchIndex = -1
+      if (call.order) matchIndex = actualRows.findIndex((row, index) => unusedRows.has(index) && row.order === call.order)
+      if (matchIndex < 0) {
+        let closestDistance = Infinity
+        actualRows.forEach((row, index) => {
+          if (!unusedRows.has(index)) return
+          const distance = Math.abs(row.scheduledDate - call.scheduledDate)
+          if (distance <= 7 * oneDay && distance < closestDistance) {
+            matchIndex = index
+            closestDistance = distance
+          }
+        })
+      }
+      if (matchIndex < 0) return { ...call, completed: false, actual: null }
+      unusedRows.delete(matchIndex)
+      const actual = actualRows[matchIndex]
+      return { ...call, completed: actual.completed, completionDate: actual.completionDate, actual }
+    })
+
+    const completedCalls = reconciledCalls.filter((call) => call.completed)
+    const openCalls = reconciledCalls.filter((call) => !call.completed)
+    const completedDates = completedCalls.map((call) => call.completionDate).filter(Boolean).sort((a, b) => b - a)
     const lastCompleted = completedDates[0] || null
-    let nextDue = openDates[0] || (lastCompleted ? addPeriod(lastCompleted, plan.frequency) : plan.nextDue)
+    const nextDue = openCalls[0]?.scheduledDate || null
     let daysOverdue = 0
     let criticality = 'On track'
 
     if (nextDue) {
-      const dayDifference = Math.floor((nextDue - today) / 86400000)
+      const dayDifference = Math.floor((nextDue - today) / oneDay)
       if (dayDifference < 0) {
         daysOverdue = Math.abs(dayDifference)
         criticality = daysOverdue > 30 ? 'Critical' : 'Overdue'
@@ -1150,13 +1178,13 @@ function reconcilePlansWithExecution(plans, executionRows) {
       }
     }
 
-    const totalOrders = actualRows.length
-    const completedOrders = completedRows.length
+    const totalOrders = reconciledCalls.length
+    const completedOrders = completedCalls.length
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
     return {
       ...plan,
       lastCompleted,
-      lastScheduled: openDates[0] || plan.lastScheduled,
+      lastScheduled: openCalls[0]?.scheduledDate || plannedCalls.at(-1)?.scheduledDate || null,
       nextDue,
       daysOverdue,
       delayDays: daysOverdue,
@@ -1165,7 +1193,7 @@ function reconcilePlansWithExecution(plans, executionRows) {
       completionRate,
       criticality,
       riskStage: criticality === 'Critical' ? 'Critical' : daysOverdue > 0 ? 'High risk' : criticality === 'Due soon' ? 'Medium risk' : 'Low risk',
-      executionMatched: true,
+      executionMatched: actualRows.length > 0,
       executionStatus: completedOrders === totalOrders ? 'Completed' : `${completedOrders}/${totalOrders} completed`,
     }
   })
