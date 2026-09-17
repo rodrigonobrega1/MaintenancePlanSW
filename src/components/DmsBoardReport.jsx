@@ -193,14 +193,16 @@ function exportDmsWeeklyPdf(rows, notes) {
 
   let cursorY = overallCardY + overallCardHeight + 16
   const rowHeight = 24
-  machines.forEach((machine) => {
+  const machinesByCompletion = machines
+    .map((machine) => ({ machine, summary: summaryFor(rows.filter((row) => row.machine === machine)) }))
+    .sort((a, b) => b.summary.completionRate - a.summary.completionRate)
+  machinesByCompletion.forEach(({ machine, summary }) => {
     if (cursorY + rowHeight > 195) {
       drawFooter()
       pdf.addPage()
       drawHeader('DMS Board Weekly Report — Summary', `${rows.length} activities across ${machines.length} production lines`)
       cursorY = 34
     }
-    const summary = summaryFor(rows.filter((row) => row.machine === machine))
     pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('PRODUCTION LINE', 12, cursorY - 6)
     pdf.setTextColor(45, 52, 58); pdf.setFontSize(11); pdf.text(machine, 12, cursorY + 1)
     pdf.setTextColor(110, 118, 125); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7)
