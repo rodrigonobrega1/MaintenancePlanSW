@@ -1138,7 +1138,8 @@ function reconcilePlansWithExecution(plans, executionRows) {
     if (!plannedCalls.length) return { ...plan, executionMatched: false }
 
     const actualRows = (rowsByPlan.get(plan.planCode) || [])
-      .filter((row) => row.scheduledDate && row.scheduledDate >= startOfYear && row.scheduledDate < endOfYear)
+      .filter((row) => (row.completed && row.completionDate && row.completionDate >= startOfYear && row.completionDate < endOfYear)
+        || (row.scheduledDate && row.scheduledDate >= startOfYear && row.scheduledDate < endOfYear))
     const unusedRows = new Set(actualRows.map((_, index) => index))
     const reconciledCalls = plannedCalls.map((call) => {
       let matchIndex = -1
@@ -1160,11 +1161,11 @@ function reconcilePlansWithExecution(plans, executionRows) {
       return { ...call, completed: actual.completed, completionDate: actual.completionDate, actual }
     })
 
-    const completedCalls = reconciledCalls.filter((call) => call.completed)
     const openCalls = reconciledCalls.filter((call) => !call.completed)
-    const completedDates = completedCalls.map((call) => call.completionDate).filter(Boolean).sort((a, b) => b - a)
+    const validCompletedRows = actualRows.filter((row) => row.completed && row.completionDate)
+    const completedDates = validCompletedRows.map((row) => row.completionDate).sort((a, b) => b - a)
     const lastCompleted = completedDates[0] || null
-    const nextDue = openCalls[0]?.scheduledDate || null
+    const nextDue = lastCompleted ? addPeriod(lastCompleted, plan.frequency) : openCalls[0]?.scheduledDate || null
     let daysOverdue = 0
     let criticality = 'On track'
 
@@ -1179,12 +1180,12 @@ function reconcilePlansWithExecution(plans, executionRows) {
     }
 
     const totalOrders = reconciledCalls.length
-    const completedOrders = completedCalls.length
+    const completedOrders = Math.min(totalOrders, validCompletedRows.length)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
     return {
       ...plan,
       lastCompleted,
-      lastScheduled: openCalls[0]?.scheduledDate || plannedCalls.at(-1)?.scheduledDate || null,
+      lastScheduled: lastCompleted || openCalls[0]?.scheduledDate || plannedCalls.at(-1)?.scheduledDate || null,
       nextDue,
       daysOverdue,
       delayDays: daysOverdue,
