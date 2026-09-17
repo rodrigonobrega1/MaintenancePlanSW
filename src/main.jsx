@@ -746,8 +746,13 @@ function App() {
   const [timelineLoading, setTimelineLoading] = useState(true)
   const [timelineError, setTimelineError] = useState('')
   const [timelineFileName, setTimelineFileName] = useState('MAINTENANCE PLANS WITH ORDERS.XLSX')
+  const [executionRows, setExecutionRows] = useState([])
+  const [executionFileName, setExecutionFileName] = useState('')
+  const [executionUploadLoading, setExecutionUploadLoading] = useState(false)
+  const [executionUploadError, setExecutionUploadError] = useState('')
   const [logbookRecords, setLogbookRecords] = useState([])
   const [criticalReportPlans, setCriticalReportPlans] = useState([])
+  const reconciledTimelinePlans = useMemo(() => reconcilePlansWithExecution(timelinePlans, executionRows), [timelinePlans, executionRows])
   useEffect(() => {
     try {
       const savedReport = localStorage.getItem(dashboardReportStorageKey)
@@ -794,6 +799,22 @@ function App() {
       setTimelineError('The selected file could not be analyzed. Check that it is a valid Excel workbook.')
     } finally {
       setTimelineLoading(false)
+      event.target.value = ''
+    }
+  }
+
+  const handleExecutionUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setExecutionUploadLoading(true)
+    setExecutionUploadError('')
+    try {
+      setExecutionRows(normalizeExecutionExport(await file.arrayBuffer()))
+      setExecutionFileName(file.name)
+    } catch (uploadError) {
+      setExecutionUploadError(uploadError.message || 'The execution export could not be analyzed.')
+    } finally {
+      setExecutionUploadLoading(false)
       event.target.value = ''
     }
   }
@@ -886,11 +907,16 @@ function App() {
           <DmsBoardReport />
         ) : (
           <MaintenancePlanDashboard
-            plans={timelinePlans}
+            plans={reconciledTimelinePlans}
             loading={timelineLoading}
             error={timelineError}
             fileName={timelineFileName}
             onUpload={handleTimelineUpload}
+            executionFileName={executionFileName}
+            executionRecordCount={executionRows.length}
+            executionLoading={executionUploadLoading}
+            executionError={executionUploadError}
+            onExecutionUpload={handleExecutionUpload}
             onExport={(plans, line, notes, shutdownDate) => {
               setCriticalReportPlans(plans)
               exportPlanDashboardPdf({ plans, line, notes, shutdownDate })
@@ -1067,8 +1093,82 @@ function normalizeTimelineWorkbook(buffer) {
       completionRate,
       criticality,
       riskStage,
+      calls: group.calls,
     }
   }).sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
+}
+
+function normalizeExecutionExport(buffer) {
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' })
+  if (!rows.length || !Object.prototype.hasOwnProperty.call(rows[0], 'Maintenance Plan') || !Object.prototype.hasOwnProperty.call(rows[0], 'User Status')) {
+    throw new Error('The execution export must contain Maintenance Plan and User Status columns.')
+  }
+  return rows.map((row) => {
+    const userStatus = String(row['User Status'] || '').trim().toUpperCase()
+    return {
+      order: String(row.Order || '').trim(),
+      planCode: String(row['Maintenance Plan'] || '').trim(),
+      description: String(row.Description || '').trim(),
+      scheduledDate: toDate(row['Basic start date']),
+      completionDate: /^WCMP\b/.test(userStatus) ? toDate(row['Completion Date']) : null,
+      completed: /^WCMP\b/.test(userStatus),
+      userStatus,
+    }
+  }).filter((row) => row.planCode)
+}
+
+function reconcilePlansWithExecution(plans, executionRows) {
+  if (!executionRows.length) return plans
+  const rowsByPlan = executionRows.reduce((groups, row) => {
+    if (!groups.has(row.planCode)) groups.set(row.planCode, [])
+    groups.get(row.planCode).push(row)
+    return groups
+  }, new Map())
+  const today = new Date()
+
+  return plans.map((plan) => {
+    const actualRows = rowsByPlan.get(plan.planCode)
+    if (!actualRows?.length) return { ...plan, executionMatched: false }
+
+    const completedRows = actualRows.filter((row) => row.completed)
+    const openRows = actualRows.filter((row) => !row.completed)
+    const completedDates = completedRows.map((row) => row.completionDate).filter(Boolean).sort((a, b) => b - a)
+    const openDates = openRows.map((row) => row.scheduledDate).filter(Boolean).sort((a, b) => a - b)
+    const lastCompleted = completedDates[0] || null
+    let nextDue = openDates[0] || (lastCompleted ? addPeriod(lastCompleted, plan.frequency) : plan.nextDue)
+    let daysOverdue = 0
+    let criticality = 'On track'
+
+    if (nextDue) {
+      const dayDifference = Math.floor((nextDue - today) / 86400000)
+      if (dayDifference < 0) {
+        daysOverdue = Math.abs(dayDifference)
+        criticality = daysOverdue > 30 ? 'Critical' : 'Overdue'
+      } else if (dayDifference <= 14) {
+        criticality = 'Due soon'
+      }
+    }
+
+    const totalOrders = actualRows.length
+    const completedOrders = completedRows.length
+    const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
+    return {
+      ...plan,
+      lastCompleted,
+      lastScheduled: openDates[0] || plan.lastScheduled,
+      nextDue,
+      daysOverdue,
+      delayDays: daysOverdue,
+      totalOrders,
+      completedOrders,
+      completionRate,
+      criticality,
+      riskStage: criticality === 'Critical' ? 'Critical' : daysOverdue > 0 ? 'High risk' : criticality === 'Due soon' ? 'Medium risk' : 'Low risk',
+      executionMatched: true,
+      executionStatus: completedOrders === totalOrders ? 'Completed' : `${completedOrders}/${totalOrders} completed`,
+    }
+  })
 }
 
 function normalizeLogbookRecords(buffer) {
@@ -1346,7 +1446,7 @@ function RichTextEditor({ value, onChange, placeholder }) {
   )
 }
 
-function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, onExport }) {
+function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, executionFileName, executionRecordCount, executionLoading, executionError, onExecutionUpload, onExport }) {
   const [selectedMachines, setSelectedMachines] = useState([])
   const [machineFilterOpen, setMachineFilterOpen] = useState(false)
   const [priorityVisibleCount, setPriorityVisibleCount] = useState(10)
@@ -1383,6 +1483,7 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
   const visiblePlans = useMemo(() => plans.filter((plan) => !selectedMachines.length || selectedMachines.includes(plan.machine)), [plans, selectedMachines])
   const prioritizedPlans = useMemo(() => sortMaintenancePlans(visiblePlans), [visiblePlans])
   const visiblePriorityPlans = prioritizedPlans.slice(0, priorityVisibleCount)
+  const matchedPlans = plans.filter((plan) => plan.executionMatched).length
 
   const filteredNotes = useMemo(() => {
     return teamNotes.filter((n) => !selectedMachines.length || n.line === 'All production lines' || selectedMachines.includes(n.line))
@@ -1440,7 +1541,8 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
         <p>Operational monitoring by equipment and production line.</p>
       </div>
       <div className="intro-actions no-print">
-        <label className="button button-primary upload-button"><Upload size={17} />Upload Excel<input type="file" accept=".xlsx,.xls" onChange={onUpload} /></label>
+        <label className="button button-primary upload-button"><Upload size={17} />Upload Plan<input type="file" accept=".xlsx,.xls" onChange={onUpload} /></label>
+        <label className="button button-secondary upload-button"><FileSpreadsheet size={16} />{executionLoading ? 'Comparing...' : 'Upload Execution'}<input type="file" accept=".xlsx,.xls" onChange={onExecutionUpload} disabled={executionLoading} /></label>
         <button className="button button-secondary" onClick={() => setShowReportModal(true)}><FileDown size={15} />Report</button>
         <button className="button button-secondary" disabled={!selectedMachines.length} onClick={() => setShowWeeklyReportModal(true)}><CalendarDays size={15} />Weekly Report</button>
       </div>
@@ -1449,10 +1551,16 @@ function MaintenancePlanDashboard({ plans, loading, error, fileName, onUpload, o
       <div className="file-icon">XLS</div>
       <div>
         <strong>{fileName}</strong>
-        <span>{plans.length} plans analyzed · execution and due dates</span>
+        <span>{plans.length} maintenance plans · planning schedule source</span>
       </div>
       <span className="live-pill"><i />Live</span>
     </div>
+    {executionError && <div className="upload-error"><AlertTriangle size={15} />{executionError}</div>}
+    {executionFileName && <div className="execution-source-strip">
+      <div className="file-icon">ACT</div>
+      <div><strong>{executionFileName}</strong><span>{executionRecordCount} execution orders compared · {matchedPlans} of {plans.length} plans matched</span></div>
+      <span className="execution-match-pill"><Check size={11} />Reconciled</span>
+    </div>}
     <section className="plan-filter-panel no-print">
       <div className="filter-title">
         <SlidersHorizontal size={16} />
