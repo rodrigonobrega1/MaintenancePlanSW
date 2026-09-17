@@ -90,7 +90,9 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleDateString('en-GB') : '—'
 }
 
-function drawStatusBar(pdf, x, y, width, summary) {
+// Gantt-style stacked bar: colored segments with their count printed inside when there's room.
+// The legend is drawn once above the table, so this only renders the bar itself.
+function drawStatusBar(pdf, x, y, width, height, summary) {
   const parts = [
     ['Completed', summary.completed, [46, 125, 74]],
     ['Not Started', summary.notStarted, [189, 103, 92]],
@@ -98,25 +100,22 @@ function drawStatusBar(pdf, x, y, width, summary) {
     ['Started', summary.started, [77, 127, 209]],
   ]
   pdf.setFillColor(235, 238, 240)
-  pdf.roundedRect(x, y, width, 7, 2, 2, 'F')
+  pdf.roundedRect(x, y, width, height, 1.4, 1.4, 'F')
   let cursor = x
   parts.forEach(([, count, color]) => {
     if (!count || !summary.total) return
     const segmentWidth = (count / summary.total) * width
     pdf.setFillColor(...color)
-    pdf.rect(cursor, y, segmentWidth, 7, 'F')
+    pdf.rect(cursor, y, segmentWidth, height, 'F')
+    if (segmentWidth > 6) {
+      const label = String(count)
+      pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(Math.min(7, height))
+      pdf.text(label, cursor + segmentWidth / 2 - pdf.getTextWidth(label) / 2, y + height / 2 + height * .28)
+    }
     cursor += segmentWidth
   })
-  let legendX = x
-  const legendY = y + 13
-  parts.forEach(([label, count, color]) => {
-    pdf.setFillColor(...color); pdf.rect(legendX, legendY - 2.6, 2.6, 2.6, 'F')
-    pdf.setTextColor(85, 93, 100); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(label, legendX + 4, legendY)
-    const labelWidth = pdf.getTextWidth(label)
-    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.text(String(count), legendX + 6 + labelWidth, legendY)
-    legendX += 6 + labelWidth + pdf.getTextWidth(String(count)) + 11
-  })
 }
+
 
 function exportDmsWeeklyPdf(rows, notes) {
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
@@ -178,40 +177,49 @@ function exportDmsWeeklyPdf(rows, notes) {
     })
   }
 
-  // --- Summary pages first: scorecards, then overall and per-line distribution charts ---
+  // --- Summary page first: scorecards, legend, then a single Gantt-style table listing every line ---
   const overall = summaryFor(rows)
-  drawHeader('DMS Board Weekly Report — Summary', `${rows.length} activities across ${machines.length} production lines · Issued ${new Date().toLocaleDateString('en-GB')}`)
+  drawHeader('DMS Board Weekly Report — Summary', `${rows.length} total activities across ${machines.length} production lines · Issued ${new Date().toLocaleDateString('en-GB')}`)
   drawKpis(overall, 32)
 
-  // Overall performance card: rounded panel with an accent rail, visually separated from the per-line rows below.
-  const overallCardY = 60; const overallCardHeight = 32
-  pdf.setFillColor(250, 248, 245); pdf.setDrawColor(217, 130, 59); pdf.setLineWidth(1.4)
-  pdf.line(12, overallCardY, 12, overallCardY + overallCardHeight)
-  pdf.setFillColor(250, 249, 246); pdf.setDrawColor(232, 224, 213); pdf.setLineWidth(.5)
-  pdf.roundedRect(13.5, overallCardY, 271.5, overallCardHeight, 2, 2, 'FD')
-  pdf.setTextColor(185, 106, 53); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('OVERALL PERFORMANCE', 20, overallCardY + 10)
-  pdf.setTextColor(45, 52, 58); pdf.setFontSize(13); pdf.text('All production lines', 20, overallCardY + 20)
-  drawStatusBar(pdf, 100, overallCardY + 9, 180, overall)
+  const legendParts = [
+    ['Completed', [46, 125, 74]], ['Not Started', [189, 103, 92]],
+    ['Parts Requested', [217, 130, 59]], ['Started', [77, 127, 209]],
+  ]
+  let legendX = 12
+  const legendY = 63
+  legendParts.forEach(([label, color]) => {
+    pdf.setFillColor(...color); pdf.rect(legendX, legendY - 2.6, 2.8, 2.8, 'F')
+    pdf.setTextColor(60, 68, 75); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.5); pdf.text(label, legendX + 4.5, legendY)
+    legendX += 4.5 + pdf.getTextWidth(label) + 12
+  })
 
-  let cursorY = overallCardY + overallCardHeight + 16
-  const rowHeight = 24
+  const tableTop = 69
+  const headerHeight = 8
+  const chartX = 150
+  pdf.setFillColor(239, 241, 244); pdf.rect(12, tableTop, 273, headerHeight, 'F')
+  pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7)
+  pdf.text('#', 15, tableTop + 5.5); pdf.text('Line', 24, tableTop + 5.5); pdf.text('Summary', 65, tableTop + 5.5)
+  pdf.text('Status Distribution', chartX, tableTop + 5.5)
+
   const machinesByCompletion = machines
     .map((machine) => ({ machine, summary: summaryFor(rows.filter((row) => row.machine === machine)) }))
     .sort((a, b) => b.summary.completionRate - a.summary.completionRate)
-  machinesByCompletion.forEach(({ machine, summary }) => {
-    if (cursorY + rowHeight > 195) {
-      drawFooter()
-      pdf.addPage()
-      drawHeader('DMS Board Weekly Report — Summary', `${rows.length} activities across ${machines.length} production lines`)
-      cursorY = 34
-    }
-    pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.text('PRODUCTION LINE', 12, cursorY - 6)
-    pdf.setTextColor(45, 52, 58); pdf.setFontSize(11); pdf.text(machine, 12, cursorY + 1)
-    pdf.setTextColor(110, 118, 125); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7)
-    pdf.text(`${summary.total} actions · ${summary.completionRate}% completed · ${summary.avgDaysOpen} average days open`, 12, cursorY + 7)
-    drawStatusBar(pdf, 95, cursorY - 7, 190, summary)
-    pdf.setDrawColor(238, 240, 241); pdf.setLineWidth(.3); pdf.line(12, cursorY + 12, 285, cursorY + 12)
-    cursorY += rowHeight
+
+  // Every production line must fit on this single page, so row height shrinks to the available space.
+  const availableHeight = 195 - (tableTop + headerHeight)
+  const rowHeight = Math.min(15, availableHeight / Math.max(1, machinesByCompletion.length))
+  const barHeight = Math.max(4, Math.min(8, rowHeight - 5))
+
+  machinesByCompletion.forEach(({ machine, summary }, index) => {
+    const rowTop = tableTop + headerHeight + index * rowHeight
+    const textY = rowTop + rowHeight / 2 + 1.3
+    if (index > 0) { pdf.setDrawColor(238, 240, 241); pdf.setLineWidth(.3); pdf.line(12, rowTop, 285, rowTop) }
+    pdf.setTextColor(150, 157, 163); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(String(index + 1).padStart(2, '0'), 15, textY)
+    pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text(machine.slice(0, 22), 24, textY)
+    pdf.setTextColor(90, 98, 105); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7)
+    pdf.text(`${summary.total} act · ${summary.completionRate}% comp · ${summary.avgDaysOpen}d`, 65, textY)
+    drawStatusBar(pdf, chartX, rowTop + (rowHeight - barHeight) / 2, 132, barHeight, summary)
   })
   drawFooter()
 
