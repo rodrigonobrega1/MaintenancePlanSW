@@ -49,6 +49,7 @@ import {
   Zap,
 } from 'lucide-react'
 import BrainDumpPrioritizer from './components/BrainDumpPrioritizer.jsx'
+import DmsBoardReport from './components/DmsBoardReport.jsx'
 import './styles.css'
 
 const initialTasks = [
@@ -63,6 +64,7 @@ const initialTasks = [
 const navItems = [
   { label: 'Maintenance Plan View', icon: LayoutDashboard },
   { label: 'Logbook', icon: ClipboardCheck },
+  { label: 'DMS Board Report', icon: FileSpreadsheet },
   { label: 'Priority Portal', icon: Zap },
 ]
 
@@ -880,6 +882,8 @@ function App() {
           />
         ) : activeView === 'Priority Portal' ? (
           <BrainDumpPrioritizer />
+        ) : activeView === 'DMS Board Report' ? (
+          <DmsBoardReport />
         ) : (
           <MaintenancePlanDashboard
             plans={timelinePlans}
