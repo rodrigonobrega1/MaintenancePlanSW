@@ -4,6 +4,7 @@ import { jsPDF } from 'jspdf'
 import { AlertTriangle, Check, FileDown, FileSpreadsheet, StickyNote, Upload } from 'lucide-react'
 
 const NOTES_KEY = 'fieldmark-dms-board-notes'
+const BOARD_DATA_KEY = 'fieldmark-dms-board-data'
 const STATUS_ORDER = { 'Not Started': 0, Started: 1, 'Parts Requested': 2, Completed: 3 }
 const STATUS_COLORS = {
   Completed: '#2e7d4a',
@@ -84,6 +85,15 @@ function summaryFor(rows) {
 
 function loadNotes() {
   try { return JSON.parse(localStorage.getItem(NOTES_KEY) || '{}') } catch { return {} }
+}
+
+function loadSavedBoard() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BOARD_DATA_KEY) || '{}')
+    return { records: Array.isArray(saved.records) ? saved.records : [], fileName: saved.fileName || '' }
+  } catch {
+    return { records: [], fileName: '' }
+  }
 }
 
 function formatDate(value) {
@@ -257,8 +267,9 @@ function StatusDistribution({ summary }) {
 }
 
 export default function DmsBoardReport() {
-  const [records, setRecords] = useState([])
-  const [fileName, setFileName] = useState('')
+  const [savedBoard] = useState(loadSavedBoard)
+  const [records, setRecords] = useState(savedBoard.records)
+  const [fileName, setFileName] = useState(savedBoard.fileName)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [notes, setNotes] = useState(loadNotes)
@@ -273,8 +284,10 @@ export default function DmsBoardReport() {
     if (!file) return
     setUploading(true); setError('')
     try {
-      setRecords(normalizeRows(await file.arrayBuffer()))
+      const nextRecords = normalizeRows(await file.arrayBuffer())
+      setRecords(nextRecords)
       setFileName(file.name)
+      try { localStorage.setItem(BOARD_DATA_KEY, JSON.stringify({ records: nextRecords, fileName: file.name, savedAt: new Date().toISOString() })) } catch {}
     } catch {
       setError('The selected DMS CSV/Excel file could not be analyzed.')
     } finally {
