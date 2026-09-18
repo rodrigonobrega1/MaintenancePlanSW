@@ -198,9 +198,31 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     })
   }
 
+  const drawWeeklyTaskTable = (title, tasks, startY, recent = false) => {
+    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10.5); pdf.text(title, 12, startY - 6)
+    pdf.setFillColor(239, 241, 244); pdf.rect(12, startY, 273, 8, 'F')
+    pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.2)
+    pdf.text('Rank', 15, startY + 5.5); pdf.text('Activity / Plan', 28, startY + 5.5); pdf.text('Machine / Frequency', 108, startY + 5.5); pdf.text('Execution', 145, startY + 5.5); pdf.text('Next Planned', 176, startY + 5.5); pdf.text('Orders', 207, startY + 5.5); pdf.text('Completion', 234, startY + 5.5); pdf.text('Status', 263, startY + 5.5)
+    tasks.forEach((plan, taskIndex) => {
+      const y = startY + 15 + taskIndex * 7.5
+      const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'
+      pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2.3, 285, y + 2.3)
+      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.5); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
+      pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.8); pdf.text(plan.activity.slice(0, 43), 28, y - 1)
+      pdf.setTextColor(130, 138, 145); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(5.2); pdf.text(plan.planCode.slice(0, 20), 28, y + 2)
+      pdf.setTextColor(90, 98, 105); pdf.setFontSize(5.8); pdf.text(plan.machine.slice(0, 17), 108, y - 1); pdf.setFontSize(5.2); pdf.text(plan.frequency, 108, y + 2)
+      pdf.setFontSize(5.8); pdf.text(plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed', 145, y)
+      pdf.text(plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned', 176, y)
+      pdf.text(`${plan.completedOrders}/${plan.totalOrders}`, 207, y)
+      pdf.text(`${plan.completionRate}%`, 234, y)
+      pdf.setTextColor(...severityColors[severityLabel]); pdf.setFont('helvetica', 'bold'); pdf.text(recent ? (plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'No execution') : severityLabel, 263, y - 1)
+      pdf.setFontSize(5); pdf.text(!recent && plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : '', 263, y + 2)
+    })
+  }
+
   allocations.forEach((allocation, index) => {
     pdf.addPage()
-    const summary = getTopCriticalTasksPerLine(plans, allocation.machine, 10)
+    const summary = getTopCriticalTasksPerLine(plans, allocation.machine, 5)
     const total = summary.linePlans.length || 1
 
     pdf.setTextColor(140, 146, 153); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.6)
@@ -216,27 +238,14 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     pdf.setTextColor(120, 128, 134); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.text('CRITICALITY DISTRIBUTION', 118, top - 9)
     drawCriticalityBars(150, 155, 110, top - 1, summary.distribution, total)
 
-    const cursor = top + 40
-    pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11.5); pdf.text('TOP 10 CRITICAL PLANS', 12, cursor - 6)
-
-    pdf.setFillColor(239, 241, 244); pdf.rect(12, cursor, 273, 8, 'F')
-    pdf.setTextColor(70, 78, 85); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5)
-    pdf.text('Rank', 15, cursor + 5.5); pdf.text('Activity / Plan', 28, cursor + 5.5); pdf.text('Machine / Frequency', 108, cursor + 5.5); pdf.text('Execution', 145, cursor + 5.5); pdf.text('Next Planned', 176, cursor + 5.5); pdf.text('Orders', 207, cursor + 5.5); pdf.text('Completion', 234, cursor + 5.5); pdf.text('Status', 263, cursor + 5.5)
-    summary.topTasks.forEach((plan, taskIndex) => {
-      const y = cursor + 15 + taskIndex * 9
-      const severityLabel = plan.criticality === 'Critical' ? 'Critical' : plan.daysOverdue > 0 ? 'Overdue' : 'Normal'
-      pdf.setDrawColor(235, 238, 240); pdf.line(12, y + 2.6, 285, y + 2.6)
-      pdf.setTextColor(145, 151, 157); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.8); pdf.text(String(taskIndex + 1).padStart(2, '0'), 15, y)
-      pdf.setTextColor(45, 52, 58); pdf.setFont('helvetica', 'bold'); pdf.text(plan.activity.slice(0, 43), 28, y - 1)
-      pdf.setTextColor(130, 138, 145); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(5.7); pdf.text(plan.planCode.slice(0, 20), 28, y + 2.2)
-      pdf.setTextColor(90, 98, 105); pdf.setFontSize(6.2); pdf.text(plan.machine.slice(0, 17), 108, y - 1); pdf.setFontSize(5.7); pdf.text(plan.frequency, 108, y + 2.2)
-      pdf.setFontSize(6.2); pdf.text(plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed', 145, y)
-      pdf.text(plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned', 176, y)
-      pdf.text(`${plan.completedOrders}/${plan.totalOrders}`, 207, y)
-      pdf.text(`${plan.completionRate}%`, 234, y)
-      pdf.setTextColor(...severityColors[severityLabel]); pdf.setFont('helvetica', 'bold'); pdf.text(severityLabel, 263, y - 1)
-      pdf.setFontSize(5.5); pdf.text(plan.daysOverdue > 0 ? `${plan.daysOverdue}d overdue` : '', 263, y + 2.2)
-    })
+    const criticalTableTop = top + 40
+    drawWeeklyTaskTable('TOP 5 CRITICAL PLANS', summary.topTasks, criticalTableTop)
+    const recentTasks = [...summary.linePlans]
+      .filter((plan) => plan.lastCompleted)
+      .sort((a, b) => b.lastCompleted - a.lastCompleted)
+      .slice(0, 5)
+    const recentTableTop = criticalTableTop + 8 + summary.topTasks.length * 7.5 + 15
+    drawWeeklyTaskTable('TOP 5 MOST RECENTLY COMPLETED', recentTasks, recentTableTop, true)
     drawFooter()
   })
 
