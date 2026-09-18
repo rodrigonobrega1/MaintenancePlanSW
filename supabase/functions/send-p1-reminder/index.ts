@@ -1,5 +1,3 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
 const recipient = 'rodrigo.nobrega@smurfitwestrock.co.uk'
 const senderName = 'Priority Portal - Maintenance Planning'
 const londonFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -21,6 +19,20 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character] || character)
 }
 
+async function supabaseRest(path: string, init: RequestInit = {}) {
+  const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  })
+  if (!response.ok) throw new Error(await response.text())
+  return response.status === 204 ? null : response.json()
+}
+
 Deno.serve(async (request) => {
   const cronSecret = Deno.env.get('PRIORITY_CRON_SECRET')
   const requestSecret = request.headers.get('x-priority-cron-secret')
@@ -31,25 +43,14 @@ Deno.serve(async (request) => {
     return Response.json({ skipped: true, reason: 'Outside 10:00 Europe/London window', londonTime: now })
   }
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  )
   const resendKey = Deno.env.get('RESEND_API_KEY')
   const fromEmail = Deno.env.get('RESEND_FROM_EMAIL')
   if (!resendKey || !fromEmail) return Response.json({ error: 'Missing RESEND_API_KEY or RESEND_FROM_EMAIL' }, { status: 500 })
 
-  const { data: alreadySent } = await supabase.from('priority_reminder_log').select('id').eq('reminder_date', now.date).maybeSingle()
+  const alreadySent = await supabaseRest(`priority_reminder_log?select=id&reminder_date=eq.${now.date}&limit=1`)
   if (alreadySent) return Response.json({ skipped: true, reason: 'Reminder already sent today', date: now.date })
 
-  const { data: tasks, error } = await supabase
-    .from('priority_tasks')
-    .select('titulo, acao, data_criacao, user_id')
-    .eq('prioridade', 'P1')
-    .eq('status', 'pendente')
-    .order('data_criacao', { ascending: true })
-
-  if (error) return Response.json({ error: error.message }, { status: 500 })
+  const tasks = await supabaseRest('priority_tasks?select=titulo,acao,data_criacao&prioridade=eq.P1&status=eq.pendente&order=data_criacao.asc')
   if (!tasks?.length) return Response.json({ sent: false, reason: 'No pending P1 tasks', date: now.date })
 
   const rows = tasks.map((task, index) => `<tr><td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#6b7280">${index + 1}</td><td style="padding:10px;border-bottom:1px solid #e5e7eb"><strong>${escapeHtml(task.titulo)}</strong><br><span style="color:#6b7280">${escapeHtml(task.acao || '')}</span></td></tr>`).join('')
@@ -65,7 +66,6 @@ Deno.serve(async (request) => {
   })
   if (!response.ok) return Response.json({ error: await response.text() }, { status: 502 })
 
-  const { error: logError } = await supabase.from('priority_reminder_log').insert({ reminder_date: now.date, task_count: tasks.length })
-  if (logError) return Response.json({ error: logError.message }, { status: 500 })
+  await supabaseRest('priority_reminder_log', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ reminder_date: now.date, task_count: tasks.length }) })
   return Response.json({ sent: true, taskCount: tasks.length, date: now.date })
 })
