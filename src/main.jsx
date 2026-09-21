@@ -65,6 +65,44 @@ const dashboardReportStorageKey = 'fieldmark-dashboard-report'
 const maintenanceScheduleStorageKey = 'fieldmark-maintenance-schedule'
 const teamNotesStorageKey = 'fieldmark-team-notes'
 const executionUploadStorageKey = 'fieldmark-execution-upload'
+const planUploadStorageKey = 'fieldmark-plan-upload'
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  return btoa(binary)
+}
+
+function base64ToArrayBuffer(base64) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes.buffer
+}
+
+function restorePlanUploadState() {
+  try {
+    const saved = localStorage.getItem(planUploadStorageKey)
+    if (!saved) return null
+    const payload = JSON.parse(saved)
+    if (!payload?.base64 || !payload?.fileName) return null
+    return { buffer: base64ToArrayBuffer(payload.base64), fileName: payload.fileName }
+  } catch {
+    return null
+  }
+}
+
+function persistPlanUploadState(buffer, fileName) {
+  try {
+    localStorage.setItem(planUploadStorageKey, JSON.stringify({ base64: arrayBufferToBase64(buffer), fileName }))
+  } catch {
+    localStorage.removeItem(planUploadStorageKey)
+  }
+}
 
 function restoreExecutionUploadState() {
   try {
@@ -784,6 +822,20 @@ function App() {
   }, [executionRows, executionFileName])
 
   useEffect(() => {
+    const restoredPlanUpload = restorePlanUploadState()
+    if (restoredPlanUpload) {
+      try {
+        setSourcePlans(normalizeWorkbook(restoredPlanUpload.buffer))
+        setTimelinePlans(normalizeTimelineWorkbook(restoredPlanUpload.buffer))
+        setSourceFileName(restoredPlanUpload.fileName)
+        setTimelineFileName(restoredPlanUpload.fileName)
+        setSourceLoading(false)
+        setTimelineLoading(false)
+        return
+      } catch {
+        localStorage.removeItem(planUploadStorageKey)
+      }
+    }
     fetch(`${import.meta.env.BASE_URL}MAINTENANCE%20PLANS%20WITH%20ORDERS.XLSX`)
       .then((response) => {
         if (!response.ok) throw new Error('Unable to load the workbook')
@@ -814,6 +866,7 @@ function App() {
       setSourcePlans(normalizeWorkbook(buffer))
       setTimelineFileName(file.name)
       setSourceFileName(file.name)
+      persistPlanUploadState(buffer, file.name)
     } catch {
       setTimelineError('The selected file could not be analyzed. Check that it is a valid Excel workbook.')
     } finally {
