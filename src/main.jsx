@@ -109,8 +109,14 @@ function restoreExecutionUploadState() {
     const saved = localStorage.getItem(executionUploadStorageKey)
     if (!saved) return { rows: [], fileName: '' }
     const payload = JSON.parse(saved)
+    // JSON strips Date instances to strings, so scheduled/completion dates must be rehydrated
+    const rows = Array.isArray(payload?.rows) ? payload.rows.map((row) => ({
+      ...row,
+      scheduledDate: row.scheduledDate ? new Date(row.scheduledDate) : null,
+      completionDate: row.completionDate ? new Date(row.completionDate) : null,
+    })) : []
     return {
-      rows: Array.isArray(payload?.rows) ? payload.rows : [],
+      rows,
       fileName: typeof payload?.fileName === 'string' ? payload.fileName : '',
     }
   } catch {
