@@ -1118,24 +1118,24 @@ function normalizeTimelineWorkbook(buffer) {
       const futureScheduledCall = uncompletedCalls.find((c) => c.scheduledDate > lastCompleted)
       nextDue = futureScheduledCall ? futureScheduledCall.scheduledDate : nextDueFromCompletion
 
-      if (nextDue < today) {
-        daysOverdue = Math.max(0, Math.floor((today - nextDue) / 86400000))
+      const daysUntilDue = calendarDayDifference(nextDue, today)
+      if (daysUntilDue < 0) {
+        daysOverdue = Math.abs(daysUntilDue)
         criticality = daysOverdue > 30 ? 'Critical' : 'Overdue'
       } else {
         daysOverdue = 0
-        const daysUntilDue = Math.floor((nextDue - today) / 86400000)
         criticality = daysUntilDue <= 14 ? 'Due soon' : 'On track'
       }
     } else {
       const earliestScheduled = uncompletedCalls[0]
       if (earliestScheduled) {
         nextDue = earliestScheduled.scheduledDate
-        if (nextDue < today) {
-          daysOverdue = Math.max(0, Math.floor((today - nextDue) / 86400000))
+        const daysUntilDue = calendarDayDifference(nextDue, today)
+        if (daysUntilDue < 0) {
+          daysOverdue = Math.abs(daysUntilDue)
           criticality = daysOverdue > 30 ? 'Critical' : 'Overdue'
         } else {
           daysOverdue = 0
-          const daysUntilDue = Math.floor((nextDue - today) / 86400000)
           criticality = daysUntilDue <= 14 ? 'Due soon' : 'On track'
         }
       } else {
@@ -1150,6 +1150,7 @@ function normalizeTimelineWorkbook(buffer) {
       id: `timeline-${index}`,
       machine: group.machine,
       activity: group.activity,
+      description: group.rawDescription,
       planCode: group.planCode,
       frequency,
       lastCompleted,
@@ -1176,21 +1177,37 @@ function normalizeOrderNumber(value) {
   return String(value || '').trim().toUpperCase().replace(/\.0$/, '').replace(/\s+/g, '')
 }
 
+function normalizeActivityDescription(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function getWorkbookValue(row, header) {
+  const normalizedHeader = String(header).toLowerCase().replace(/[^a-z0-9]/g, '')
+  const key = Object.keys(row).find((column) => column.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedHeader)
+  return key ? row[key] : ''
+}
+
+function hasWorkbookColumn(row, header) {
+  const normalizedHeader = String(header).toLowerCase().replace(/[^a-z0-9]/g, '')
+  return Object.keys(row).some((column) => column.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedHeader)
+}
+
 function normalizeExecutionExport(buffer) {
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' })
-  if (!rows.length || !Object.prototype.hasOwnProperty.call(rows[0], 'Maintenance Plan') || !Object.prototype.hasOwnProperty.call(rows[0], 'User Status')) {
+  if (!rows.length || !hasWorkbookColumn(rows[0], 'Maintenance Plan') || !hasWorkbookColumn(rows[0], 'User Status')) {
     throw new Error('The execution export must contain Maintenance Plan and User Status columns.')
   }
   return rows.map((row) => {
-    const userStatus = String(row['User Status'] || '').trim().toUpperCase()
+    const userStatus = String(getWorkbookValue(row, 'User Status') || '').trim().toUpperCase()
+    const completionDate = toDate(getWorkbookValue(row, 'Completion Date'))
     return {
-      order: normalizeOrderNumber(row.Order),
-      planCode: normalizeMaintenancePlanCode(row['Maintenance Plan']),
-      description: String(row.Description || '').trim(),
-      scheduledDate: toDate(row['Basic start date']),
-      completionDate: /^WCMP\b/.test(userStatus) ? toDate(row['Completion Date']) : null,
-      completed: /^WCMP\b/.test(userStatus),
+      order: normalizeOrderNumber(getWorkbookValue(row, 'Order')),
+      planCode: normalizeMaintenancePlanCode(getWorkbookValue(row, 'Maintenance Plan')),
+      description: String(getWorkbookValue(row, 'Description') || '').trim(),
+      scheduledDate: toDate(getWorkbookValue(row, 'Basic start date')),
+      completionDate,
+      completed: Boolean(completionDate),
       userStatus,
     }
   }).filter((row) => row.planCode)
@@ -1223,7 +1240,9 @@ function reconcilePlansWithExecution(plans, executionRows) {
     if (!plannedCalls.length) return { ...plan, executionMatched: false }
 
     const planCode = normalizeMaintenancePlanCode(plan.planCode)
-    const actualRows = rowsByPlan.get(planCode) || []
+    const description = normalizeActivityDescription(plan.description || `${plan.machine} - ${plan.activity}`)
+    const activityRows = (rowsByPlan.get(planCode) || []).filter((row) => !description || normalizeActivityDescription(row.description) === description)
+    const actualRows = activityRows.filter((row) => [row.scheduledDate, row.completionDate].some((date) => date && date >= startOfYear && date < endOfYear))
     const reconciledCalls = plannedCalls.map((call) => {
       const order = normalizeOrderNumber(call.order)
       let actual = order ? (rowsByOrder.get(order) || []).find((row) => !usedExecutionRows.has(row)) : null
@@ -1247,14 +1266,14 @@ function reconcilePlansWithExecution(plans, executionRows) {
     if (!matchedCalls.length) return { ...plan, executionMatched: false }
     const openCalls = reconciledCalls.filter((call) => !call.completed)
     const completedCalls = matchedCalls.filter((call) => call.completed && call.completionDate)
-    const completedDates = completedCalls.map((call) => call.completionDate).sort((a, b) => b - a)
-    const lastCompleted = completedDates[0] || plan.lastCompleted || null
+    const executionCompletionDates = activityRows.map((row) => row.completionDate).filter(Boolean).sort((a, b) => b - a)
+    const lastCompleted = executionCompletionDates[0] || plan.lastCompleted || null
     const nextDue = lastCompleted ? addPeriod(lastCompleted, plan.frequency) : openCalls[0]?.scheduledDate || plan.nextDue || null
     let daysOverdue = 0
     let criticality = 'On track'
 
     if (nextDue) {
-      const dayDifference = Math.floor((nextDue - today) / oneDay)
+      const dayDifference = calendarDayDifference(nextDue, today)
       if (dayDifference < 0) {
         daysOverdue = Math.abs(dayDifference)
         criticality = daysOverdue > 30 ? 'Critical' : 'Overdue'
@@ -1290,12 +1309,30 @@ function addPeriod(date, frequency) {
   if (frequency === 'Daily') next.setDate(next.getDate() + 1)
   else if (frequency === 'Weekly') next.setDate(next.getDate() + 7)
   else if (frequency === '6-Weekly') next.setDate(next.getDate() + 42)
-  else if (frequency === 'Monthly') next.setMonth(next.getMonth() + 1)
-  else if (frequency === 'Quarterly') next.setMonth(next.getMonth() + 3)
-  else if (frequency === 'Biannual') next.setMonth(next.getMonth() + 6)
-  else if (frequency === 'Annual') next.setFullYear(next.getFullYear() + 1)
+  else if (frequency === 'Monthly') return addCalendarMonths(next, 1)
+  else if (frequency === 'Quarterly') return addCalendarMonths(next, 3)
+  else if (frequency === 'Biannual') return addCalendarMonths(next, 6)
+  else if (frequency === 'Annual') return addCalendarMonths(next, 12)
   else next.setDate(next.getDate() + 30)
   return next
+}
+
+function addCalendarMonths(date, months) {
+  const next = new Date(date)
+  const day = next.getDate()
+  next.setDate(1)
+  next.setMonth(next.getMonth() + months)
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
+  next.setDate(Math.min(day, lastDay))
+  return next
+}
+
+function calendarDayDifference(date, reference = new Date()) {
+  if (!date) return 0
+  const target = toDate(date)
+  const from = toDate(reference)
+  if (!target || !from) return 0
+  return Math.round((Date.UTC(target.getFullYear(), target.getMonth(), target.getDate()) - Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) / 86400000)
 }
 
 function getNextDueDate(date, frequency) {
@@ -1328,7 +1365,12 @@ function toDate(value) {
     if (!parts) return null
     return new Date(parts.y, parts.m - 1, parts.d, parts.H, parts.M, parts.S)
   }
-  const date = value instanceof Date ? value : new Date(value)
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  const text = String(value).trim()
+  const dayFirst = text.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/)
+  const date = dayFirst
+    ? new Date(Number(dayFirst[3]), Number(dayFirst[2]) - 1, Number(dayFirst[1]))
+    : new Date(text)
   return Number.isNaN(date.getTime()) ? null : date
 }
 
