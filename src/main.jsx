@@ -1220,19 +1220,11 @@ function reconcilePlansWithExecution(plans, executionRows) {
     groups.get(row.planCode).push(row)
     return groups
   }, new Map())
-  const rowsByOrder = executionRows.reduce((groups, row) => {
-    if (!row.order) return groups
-    if (!groups.has(row.order)) groups.set(row.order, [])
-    groups.get(row.order).push(row)
-    return groups
-  }, new Map())
   const today = new Date()
   const currentYear = today.getFullYear()
   const startOfYear = new Date(currentYear, 0, 1)
   const endOfYear = new Date(currentYear + 1, 0, 1)
   const oneDay = 86400000
-  const usedExecutionRows = new Set()
-
   return plans.map((plan) => {
     const plannedCalls = (plan.calls || [])
       .filter((call) => call.scheduledDate && call.scheduledDate >= startOfYear && call.scheduledDate < endOfYear)
@@ -1241,11 +1233,14 @@ function reconcilePlansWithExecution(plans, executionRows) {
 
     const planCode = normalizeMaintenancePlanCode(plan.planCode)
     const description = normalizeActivityDescription(plan.description || `${plan.machine} - ${plan.activity}`)
-    const activityRows = (rowsByPlan.get(planCode) || []).filter((row) => !description || normalizeActivityDescription(row.description) === description)
+    const plannedOrders = new Set((plan.calls || []).map((call) => normalizeOrderNumber(call.order)).filter(Boolean))
+    const activityRows = (rowsByPlan.get(planCode) || []).filter((row) => plannedOrders.has(row.order) || !description || normalizeActivityDescription(row.description) === description)
+    if (!activityRows.length) return { ...plan, executionMatched: false }
     const actualRows = activityRows.filter((row) => [row.scheduledDate, row.completionDate].some((date) => date && date >= startOfYear && date < endOfYear))
+    const usedExecutionRows = new Set()
     const reconciledCalls = plannedCalls.map((call) => {
       const order = normalizeOrderNumber(call.order)
-      let actual = order ? (rowsByOrder.get(order) || []).find((row) => !usedExecutionRows.has(row)) : null
+      let actual = order ? activityRows.find((row) => row.order === order && !usedExecutionRows.has(row)) : null
       if (!actual) {
         let closestDistance = Infinity
         actualRows.forEach((row) => {
@@ -1262,10 +1257,7 @@ function reconcilePlansWithExecution(plans, executionRows) {
       return { ...call, completed: actual.completed, completionDate: actual.completionDate, actual }
     })
 
-    const matchedCalls = reconciledCalls.filter((call) => call.actual)
-    if (!matchedCalls.length) return { ...plan, executionMatched: false }
     const openCalls = reconciledCalls.filter((call) => !call.completed)
-    const completedCalls = matchedCalls.filter((call) => call.completed && call.completionDate)
     const executionCompletionDates = activityRows.map((row) => row.completionDate).filter(Boolean).sort((a, b) => b - a)
     const lastCompleted = executionCompletionDates[0] || plan.lastCompleted || null
     const nextDue = lastCompleted ? addPeriod(lastCompleted, plan.frequency) : openCalls[0]?.scheduledDate || plan.nextDue || null
@@ -1283,7 +1275,10 @@ function reconcilePlansWithExecution(plans, executionRows) {
     }
 
     const totalOrders = reconciledCalls.length
-    const completedOrders = completedCalls.length
+    const completedOrderKeys = new Set(activityRows
+      .filter((row) => row.completionDate && row.completionDate >= startOfYear && row.completionDate < endOfYear)
+      .map((row) => row.order || `${row.scheduledDate?.getTime() || ''}|${row.completionDate.getTime()}`))
+    const completedOrders = Math.min(totalOrders, completedOrderKeys.size)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
     return {
       ...plan,
@@ -1306,6 +1301,13 @@ function reconcilePlansWithExecution(plans, executionRows) {
 function addPeriod(date, frequency) {
   if (!date) return null
   const next = new Date(date)
+  const interval = String(frequency).match(/^(\d+)-(Daily|Weekly|Monthly)$/)
+  if (interval) {
+    const count = Number(interval[1])
+    if (interval[2] === 'Monthly') return addCalendarMonths(next, count)
+    next.setDate(next.getDate() + count * (interval[2] === 'Weekly' ? 7 : 1))
+    return next
+  }
   if (frequency === 'Daily') next.setDate(next.getDate() + 1)
   else if (frequency === 'Weekly') next.setDate(next.getDate() + 7)
   else if (frequency === '6-Weekly') next.setDate(next.getDate() + 42)
@@ -1348,7 +1350,10 @@ function getCriticality(daysOverdue) {
 
 function getPeriodDays(frequency) {
   const map = { Daily: 1, Weekly: 7, '6-Weekly': 42, Monthly: 30, Quarterly: 91, Biannual: 182, Annual: 365 }
-  return map[frequency] || 30
+  if (map[frequency]) return map[frequency]
+  const interval = String(frequency).match(/^(\d+)-(Daily|Weekly|Monthly)$/)
+  if (!interval) return 30
+  return Number(interval[1]) * (interval[2] === 'Daily' ? 1 : interval[2] === 'Weekly' ? 7 : 30)
 }
 
 function getRiskStage(delayDays, periodDays, lastCompleted, lastScheduled) {
@@ -1376,6 +1381,20 @@ function toDate(value) {
 
 function inferFrequency(description, dates = []) {
   const text = (description || '').toLowerCase()
+  const interval = text.match(/\b(\d+)\s+(daily|days?|weekly|weeks?|monthly|months?|mths?|mth)\b|\b(\d+)-(weekly|monthly)\b/)
+  if (interval) {
+    const count = Number(interval[1] || interval[3])
+    const unit = interval[2] || interval[4]
+    if (/week/.test(unit)) return count === 1 ? 'Weekly' : `${count}-Weekly`
+    if (/month|mth/.test(unit)) {
+      if (count === 1) return 'Monthly'
+      if (count === 3) return 'Quarterly'
+      if (count === 6) return 'Biannual'
+      if (count === 12) return 'Annual'
+      return `${count}-Monthly`
+    }
+    return count === 1 ? 'Daily' : `${count}-Daily`
+  }
   if (text.includes('daily') || text.includes('day')) return 'Daily'
   if (text.includes('6 weekly') || text.includes('6 week')) return '6-Weekly'
   if (text.includes('weekly') || text.includes('week') || text.includes('ppm check') || text.includes('ppm of tyer')) return 'Weekly'
@@ -1983,11 +2002,9 @@ function PlanView({ plans, loading, error, fileName, onUpload, onExport }) {
   const criticalCount = visiblePlans.filter((plan) => plan.criticality === 'Critical').length
   const overdueCount = visiblePlans.filter((plan) => plan.criticality === 'Overdue').length
   const riskStages = ['Low risk', 'Medium risk', 'High risk', 'Critical']
-  const plansByFrequency = useMemo(() => ['Weekly', 'Monthly', 'Quarterly', 'Biannual', 'Annual', 'Daily'].reduce((groups, frequency) => {
-    const frequencyPlans = visiblePlans.filter((plan) => plan.frequency === frequency)
-    if (frequencyPlans.length) groups.push({ frequency, plans: frequencyPlans })
-    return groups
-  }, []), [visiblePlans])
+  const plansByFrequency = useMemo(() => [...new Set(visiblePlans.map((plan) => plan.frequency))]
+    .sort((left, right) => getPeriodDays(left) - getPeriodDays(right) || left.localeCompare(right))
+    .map((frequency) => ({ frequency, plans: visiblePlans.filter((plan) => plan.frequency === frequency) })), [visiblePlans])
   const timelineStart = new Date('2026-01-01T00:00:00')
   const timelineEnd = new Date('2026-12-31T23:59:59')
 
@@ -2271,12 +2288,13 @@ function isPlanDueInWeek(plan, weekStart, weekIndex) {
   const frequency = plan.frequency
   const daysSinceAnchor = Math.floor((weekStart - getMonday(anchor)) / 86400000)
   if (weekStart < getMonday(anchor) && frequency !== 'Daily') return false
-  if (frequency === 'Daily' || frequency === 'Weekly') return daysSinceAnchor >= 0
-  const monthsPerOccurrence = { Monthly: 1, Quarterly: 3, Biannual: 6, Annual: 12 }[frequency] || 12
+  if (frequency === 'Daily') return daysSinceAnchor >= 0
+  const weekInterval = frequency === 'Weekly' ? 1 : Number(frequency.match(/^(\d+)-Weekly$/)?.[1])
+  if (weekInterval) return daysSinceAnchor >= 0 && Math.floor(daysSinceAnchor / 7) % weekInterval === 0
+  const monthsPerOccurrence = Number(frequency.match(/^(\d+)-Monthly$/)?.[1]) || { Monthly: 1, Quarterly: 3, Biannual: 6, Annual: 12 }[frequency] || 12
   const monthDistance = (weekStart.getFullYear() - anchor.getFullYear()) * 12 + weekStart.getMonth() - anchor.getMonth()
   if (monthDistance < 0 || monthDistance % monthsPerOccurrence !== 0) return false
-  const occurrenceDate = new Date(anchor)
-  occurrenceDate.setMonth(anchor.getMonth() + monthDistance)
+  const occurrenceDate = addCalendarMonths(anchor, monthDistance)
   return formatDateKey(getMonday(occurrenceDate)) === formatDateKey(weekStart)
 }
 
