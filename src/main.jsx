@@ -1168,6 +1168,14 @@ function normalizeTimelineWorkbook(buffer) {
   }).sort((a, b) => b.daysOverdue - a.daysOverdue || b.delayDays - a.delayDays || (a.nextDue || 0) - (b.nextDue || 0))
 }
 
+function normalizeMaintenancePlanCode(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function normalizeOrderNumber(value) {
+  return String(value || '').trim().toUpperCase().replace(/\.0$/, '').replace(/\s+/g, '')
+}
+
 function normalizeExecutionExport(buffer) {
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' })
@@ -1177,8 +1185,8 @@ function normalizeExecutionExport(buffer) {
   return rows.map((row) => {
     const userStatus = String(row['User Status'] || '').trim().toUpperCase()
     return {
-      order: String(row.Order || '').trim(),
-      planCode: String(row['Maintenance Plan'] || '').trim(),
+      order: normalizeOrderNumber(row.Order),
+      planCode: normalizeMaintenancePlanCode(row['Maintenance Plan']),
       description: String(row.Description || '').trim(),
       scheduledDate: toDate(row['Basic start date']),
       completionDate: /^WCMP\b/.test(userStatus) ? toDate(row['Completion Date']) : null,
@@ -1195,11 +1203,18 @@ function reconcilePlansWithExecution(plans, executionRows) {
     groups.get(row.planCode).push(row)
     return groups
   }, new Map())
+  const rowsByOrder = executionRows.reduce((groups, row) => {
+    if (!row.order) return groups
+    if (!groups.has(row.order)) groups.set(row.order, [])
+    groups.get(row.order).push(row)
+    return groups
+  }, new Map())
   const today = new Date()
   const currentYear = today.getFullYear()
   const startOfYear = new Date(currentYear, 0, 1)
   const endOfYear = new Date(currentYear + 1, 0, 1)
   const oneDay = 86400000
+  const usedExecutionRows = new Set()
 
   return plans.map((plan) => {
     const plannedCalls = (plan.calls || [])
@@ -1207,35 +1222,34 @@ function reconcilePlansWithExecution(plans, executionRows) {
       .sort((a, b) => a.scheduledDate - b.scheduledDate)
     if (!plannedCalls.length) return { ...plan, executionMatched: false }
 
-    const actualRows = (rowsByPlan.get(plan.planCode) || [])
-      .filter((row) => (row.completed && row.completionDate && row.completionDate >= startOfYear && row.completionDate < endOfYear)
-        || (row.scheduledDate && row.scheduledDate >= startOfYear && row.scheduledDate < endOfYear))
-    const unusedRows = new Set(actualRows.map((_, index) => index))
+    const planCode = normalizeMaintenancePlanCode(plan.planCode)
+    const actualRows = rowsByPlan.get(planCode) || []
     const reconciledCalls = plannedCalls.map((call) => {
-      let matchIndex = -1
-      if (call.order) matchIndex = actualRows.findIndex((row, index) => unusedRows.has(index) && row.order === call.order)
-      if (matchIndex < 0) {
+      const order = normalizeOrderNumber(call.order)
+      let actual = order ? (rowsByOrder.get(order) || []).find((row) => !usedExecutionRows.has(row)) : null
+      if (!actual) {
         let closestDistance = Infinity
-        actualRows.forEach((row, index) => {
-          if (!unusedRows.has(index)) return
+        actualRows.forEach((row) => {
+          if (usedExecutionRows.has(row) || !row.scheduledDate) return
           const distance = Math.abs(row.scheduledDate - call.scheduledDate)
           if (distance <= 7 * oneDay && distance < closestDistance) {
-            matchIndex = index
+            actual = row
             closestDistance = distance
           }
         })
       }
-      if (matchIndex < 0) return { ...call, completed: false, actual: null }
-      unusedRows.delete(matchIndex)
-      const actual = actualRows[matchIndex]
+      if (!actual) return { ...call, completed: false, actual: null }
+      usedExecutionRows.add(actual)
       return { ...call, completed: actual.completed, completionDate: actual.completionDate, actual }
     })
 
+    const matchedCalls = reconciledCalls.filter((call) => call.actual)
+    if (!matchedCalls.length) return { ...plan, executionMatched: false }
     const openCalls = reconciledCalls.filter((call) => !call.completed)
-    const validCompletedRows = actualRows.filter((row) => row.completed && row.completionDate)
-    const completedDates = validCompletedRows.map((row) => row.completionDate).sort((a, b) => b - a)
-    const lastCompleted = completedDates[0] || null
-    const nextDue = lastCompleted ? addPeriod(lastCompleted, plan.frequency) : openCalls[0]?.scheduledDate || null
+    const completedCalls = matchedCalls.filter((call) => call.completed && call.completionDate)
+    const completedDates = completedCalls.map((call) => call.completionDate).sort((a, b) => b - a)
+    const lastCompleted = completedDates[0] || plan.lastCompleted || null
+    const nextDue = lastCompleted ? addPeriod(lastCompleted, plan.frequency) : openCalls[0]?.scheduledDate || plan.nextDue || null
     let daysOverdue = 0
     let criticality = 'On track'
 
@@ -1250,7 +1264,7 @@ function reconcilePlansWithExecution(plans, executionRows) {
     }
 
     const totalOrders = reconciledCalls.length
-    const completedOrders = Math.min(totalOrders, validCompletedRows.length)
+    const completedOrders = completedCalls.length
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
     return {
       ...plan,
@@ -1264,7 +1278,7 @@ function reconcilePlansWithExecution(plans, executionRows) {
       completionRate,
       criticality,
       riskStage: criticality === 'Critical' ? 'Critical' : daysOverdue > 0 ? 'High risk' : criticality === 'Due soon' ? 'Medium risk' : 'Low risk',
-      executionMatched: actualRows.length > 0,
+      executionMatched: true,
       executionStatus: completedOrders === totalOrders ? 'Completed' : `${completedOrders}/${totalOrders} completed`,
     }
   })
@@ -1309,6 +1323,11 @@ function getRiskStage(delayDays, periodDays, lastCompleted, lastScheduled) {
 
 function toDate(value) {
   if (!value) return null
+  if (typeof value === 'number') {
+    const parts = XLSX.SSF.parse_date_code(value)
+    if (!parts) return null
+    return new Date(parts.y, parts.m - 1, parts.d, parts.H, parts.M, parts.S)
+  }
   const date = value instanceof Date ? value : new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
 }
