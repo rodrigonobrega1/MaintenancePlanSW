@@ -1108,7 +1108,7 @@ function normalizeTimelineWorkbook(buffer) {
     const currentYear = today.getFullYear()
     const totalOrders = getExpectedAnnualOccurrences(frequency, currentYear)
     const completedPeriods = new Set(group.calls
-      .filter((call) => call.completionDate && call.scheduledDate && call.scheduledDate.getFullYear() === currentYear)
+      .filter((call) => call.completionDate?.getFullYear() === currentYear && call.scheduledDate)
       .map((call) => getAnnualOccurrenceKey(call.scheduledDate, frequency)))
     const completedOrders = Math.min(totalOrders, completedPeriods.size)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
@@ -1280,7 +1280,7 @@ function reconcilePlansWithExecution(plans, executionRows) {
 
     const totalOrders = getExpectedAnnualOccurrences(plan.frequency, currentYear)
     const completedPeriods = new Set(activityRows
-      .filter((row) => row.completionDate && row.scheduledDate && row.scheduledDate >= startOfYear && row.scheduledDate < endOfYear)
+      .filter((row) => row.completionDate && row.completionDate >= startOfYear && row.completionDate < endOfYear && row.scheduledDate)
       .map((row) => getAnnualOccurrenceKey(row.scheduledDate, plan.frequency)))
     const completedOrders = Math.min(totalOrders, completedPeriods.size)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
