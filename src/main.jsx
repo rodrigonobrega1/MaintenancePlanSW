@@ -1110,7 +1110,8 @@ function normalizeTimelineWorkbook(buffer) {
     const completedPeriods = new Set(group.calls
       .filter((call) => call.completionDate?.getFullYear() === currentYear && call.scheduledDate)
       .map((call) => getAnnualOccurrenceKey(call.scheduledDate, frequency)))
-    const completedOrders = Math.min(totalOrders, completedPeriods.size)
+    const elapsedOrders = getElapsedAnnualOccurrences(frequency, currentYear, today)
+    const completedOrders = Math.min(totalOrders, elapsedOrders, completedPeriods.size)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
 
     let nextDue = null
@@ -1287,7 +1288,8 @@ function reconcilePlansWithExecution(plans, executionRows) {
     const completedPeriods = new Set(activityRows
       .filter((row) => row.completionDate && row.completionDate >= startOfYear && row.completionDate < endOfYear && row.scheduledDate)
       .map((row) => getAnnualOccurrenceKey(row.scheduledDate, plan.frequency)))
-    const completedOrders = Math.min(totalOrders, completedPeriods.size)
+    const elapsedOrders = getElapsedAnnualOccurrences(plan.frequency, currentYear, today)
+    const completedOrders = Math.min(totalOrders, elapsedOrders, completedPeriods.size)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
     return {
       ...plan,
@@ -1375,6 +1377,25 @@ function getExpectedAnnualOccurrences(frequency, year = new Date().getFullYear()
   if (interval[2] === 'Daily') return Math.ceil(daysInYear / count)
   if (interval[2] === 'Weekly') return Math.ceil(daysInYear / (count * 7))
   return Math.ceil(12 / count)
+}
+
+function getElapsedAnnualOccurrences(frequency, year = new Date().getFullYear(), reference = new Date()) {
+  if (reference.getFullYear() < year) return 0
+  if (reference.getFullYear() > year) return getExpectedAnnualOccurrences(frequency, year)
+  const yearStart = new Date(year, 0, 1)
+  const elapsedDays = calendarDayDifference(reference, yearStart) + 1
+  const elapsedMonths = reference.getMonth() + 1
+  const fixed = { Daily: elapsedDays, Weekly: Math.ceil(elapsedDays / 7), Monthly: elapsedMonths, Quarterly: Math.ceil(elapsedMonths / 3), Biannual: Math.ceil(elapsedMonths / 6), Annual: 1 }
+  if (fixed[frequency]) return Math.min(getExpectedAnnualOccurrences(frequency, year), fixed[frequency])
+  const interval = String(frequency).match(/^(\d+)-(Daily|Weekly|Monthly)$/)
+  if (!interval) return Math.min(12, elapsedMonths)
+  const count = Number(interval[1])
+  const elapsed = interval[2] === 'Daily'
+    ? Math.ceil(elapsedDays / count)
+    : interval[2] === 'Weekly'
+      ? Math.ceil(elapsedDays / (count * 7))
+      : Math.ceil(elapsedMonths / count)
+  return Math.min(getExpectedAnnualOccurrences(frequency, year), elapsed)
 }
 
 function getAnnualOccurrenceKey(date, frequency) {
