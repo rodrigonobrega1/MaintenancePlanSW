@@ -1105,8 +1105,12 @@ function normalizeTimelineWorkbook(buffer) {
       .filter((c) => !c.completionDate && c.scheduledDate)
       .sort((a, b) => a.scheduledDate - b.scheduledDate)
 
-    const totalOrders = group.calls.length
-    const completedOrders = completedCalls.length
+    const currentYear = today.getFullYear()
+    const totalOrders = getExpectedAnnualOccurrences(frequency, currentYear)
+    const completedPeriods = new Set(group.calls
+      .filter((call) => call.completionDate && call.scheduledDate && call.scheduledDate.getFullYear() === currentYear)
+      .map((call) => getAnnualOccurrenceKey(call.scheduledDate, frequency)))
+    const completedOrders = Math.min(totalOrders, completedPeriods.size)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
 
     let nextDue = null
@@ -1274,11 +1278,11 @@ function reconcilePlansWithExecution(plans, executionRows) {
       }
     }
 
-    const totalOrders = reconciledCalls.length
-    const completedOrderKeys = new Set(activityRows
-      .filter((row) => row.completionDate && row.completionDate >= startOfYear && row.completionDate < endOfYear)
-      .map((row) => row.order || `${row.scheduledDate?.getTime() || ''}|${row.completionDate.getTime()}`))
-    const completedOrders = Math.min(totalOrders, completedOrderKeys.size)
+    const totalOrders = getExpectedAnnualOccurrences(plan.frequency, currentYear)
+    const completedPeriods = new Set(activityRows
+      .filter((row) => row.completionDate && row.scheduledDate && row.scheduledDate >= startOfYear && row.scheduledDate < endOfYear)
+      .map((row) => getAnnualOccurrenceKey(row.scheduledDate, plan.frequency)))
+    const completedOrders = Math.min(totalOrders, completedPeriods.size)
     const completionRate = totalOrders ? Math.round((completedOrders / totalOrders) * 100) : 0
     return {
       ...plan,
@@ -1354,6 +1358,37 @@ function getPeriodDays(frequency) {
   const interval = String(frequency).match(/^(\d+)-(Daily|Weekly|Monthly)$/)
   if (!interval) return 30
   return Number(interval[1]) * (interval[2] === 'Daily' ? 1 : interval[2] === 'Weekly' ? 7 : 30)
+}
+
+function getExpectedAnnualOccurrences(frequency, year = new Date().getFullYear()) {
+  const daysInYear = new Date(year, 1, 29).getMonth() === 1 ? 366 : 365
+  const fixed = { Daily: daysInYear, Weekly: Math.ceil(daysInYear / 7), Monthly: 12, Quarterly: 4, Biannual: 2, Annual: 1 }
+  if (fixed[frequency]) return fixed[frequency]
+  const interval = String(frequency).match(/^(\d+)-(Daily|Weekly|Monthly)$/)
+  if (!interval) return 12
+  const count = Number(interval[1])
+  if (interval[2] === 'Daily') return Math.ceil(daysInYear / count)
+  if (interval[2] === 'Weekly') return Math.ceil(daysInYear / (count * 7))
+  return Math.ceil(12 / count)
+}
+
+function getAnnualOccurrenceKey(date, frequency) {
+  const scheduled = toDate(date)
+  if (!scheduled) return ''
+  const year = scheduled.getFullYear()
+  const month = scheduled.getMonth()
+  const day = scheduled.getDate()
+  if (frequency === 'Annual') return `${year}`
+  if (frequency === 'Biannual') return `${year}-H${Math.floor(month / 6) + 1}`
+  if (frequency === 'Quarterly') return `${year}-Q${Math.floor(month / 3) + 1}`
+  const interval = String(frequency).match(/^(\d+)-(Daily|Weekly|Monthly)$/)
+  if (frequency === 'Monthly' || interval?.[2] === 'Monthly') return `${year}-${String(month + 1).padStart(2, '0')}`
+  if (frequency === 'Weekly' || interval?.[2] === 'Weekly') {
+    const weekStart = new Date(scheduled)
+    weekStart.setDate(day - ((scheduled.getDay() + 6) % 7))
+    return formatDateKey(weekStart)
+  }
+  return formatDateKey(scheduled)
 }
 
 function getRiskStage(delayDays, periodDays, lastCompleted, lastScheduled) {
@@ -1981,7 +2016,7 @@ function PriorityActivity({ plan, rank, expanded = false }) {
       {expanded && <div className="priority-activity-details">
         <span><small>Execution</small><b>{plan.lastCompleted ? formatPrintDate(plan.lastCompleted) : 'Not completed'}</b></span>
         <span><small>Next planned</small><b>{plan.nextDue ? formatPrintDate(plan.nextDue) : 'To be planned'}</b></span>
-        <span><small>Orders</small><b>{plan.completedOrders}/{plan.totalOrders} completed</b></span>
+        <span><small>Annual periods</small><b>{plan.completedOrders}/{plan.totalOrders} · {Math.max(0, plan.totalOrders - plan.completedOrders)} remaining</b></span>
         <span><small>Completion</small><b>{plan.completionRate}%</b></span>
         <span><small>Status</small><b>{plan.status || plan.criticality}</b></span>
       </div>}
