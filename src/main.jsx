@@ -1219,6 +1219,11 @@ function normalizeExecutionExport(buffer) {
 
 function reconcilePlansWithExecution(plans, executionRows) {
   if (!executionRows.length) return plans
+  const planCodeUseCount = plans.reduce((counts, plan) => {
+    const code = normalizeMaintenancePlanCode(plan.planCode)
+    counts.set(code, (counts.get(code) || 0) + 1)
+    return counts
+  }, new Map())
   const rowsByPlan = executionRows.reduce((groups, row) => {
     if (!groups.has(row.planCode)) groups.set(row.planCode, [])
     groups.get(row.planCode).push(row)
@@ -1238,7 +1243,7 @@ function reconcilePlansWithExecution(plans, executionRows) {
     const planCode = normalizeMaintenancePlanCode(plan.planCode)
     const description = normalizeActivityDescription(plan.description || `${plan.machine} - ${plan.activity}`)
     const plannedOrders = new Set((plan.calls || []).map((call) => normalizeOrderNumber(call.order)).filter(Boolean))
-    const activityRows = (rowsByPlan.get(planCode) || []).filter((row) => plannedOrders.has(row.order) || !description || normalizeActivityDescription(row.description) === description)
+    const activityRows = (rowsByPlan.get(planCode) || []).filter((row) => planCodeUseCount.get(planCode) === 1 || plannedOrders.has(row.order) || !description || normalizeActivityDescription(row.description) === description)
     if (!activityRows.length) return { ...plan, executionMatched: false }
     const actualRows = activityRows.filter((row) => [row.scheduledDate, row.completionDate].some((date) => date && date >= startOfYear && date < endOfYear))
     const usedExecutionRows = new Set()
@@ -1416,11 +1421,19 @@ function toDate(value) {
 
 function inferFrequency(description, dates = []) {
   const text = (description || '').toLowerCase()
+  const sortedDates = [...dates].filter(Boolean).sort((left, right) => left - right)
+  const intervals = sortedDates.slice(1).map((date, index) => (date - sortedDates[index]) / 86400000).filter((days) => days > 0).sort((left, right) => left - right)
+  const medianInterval = intervals.length ? intervals[Math.floor(intervals.length / 2)] : 0
+  if (/\bbi[\s-]*weekly\b/.test(text)) return '2-Weekly'
+  if (/\bbi[\s-]*monthly\b/.test(text)) return '2-Monthly'
   const interval = text.match(/\b(\d+)\s+(daily|days?|weekly|weeks?|monthly|months?|mths?|mth)\b|\b(\d+)-(weekly|monthly)\b/)
   if (interval) {
     const count = Number(interval[1] || interval[3])
     const unit = interval[2] || interval[4]
-    if (/week/.test(unit)) return count === 1 ? 'Weekly' : `${count}-Weekly`
+    if (/week/.test(unit)) {
+      if (medianInterval && medianInterval <= 9) return 'Weekly'
+      return count === 1 ? 'Weekly' : `${count}-Weekly`
+    }
     if (/month|mth/.test(unit)) {
       if (count === 1) return 'Monthly'
       if (count === 3) return 'Quarterly'
@@ -1437,13 +1450,13 @@ function inferFrequency(description, dates = []) {
   if (text.includes('3 monthly') || text.includes('3 month') || text.includes('quarter')) return 'Quarterly'
   if (text.includes('monthly') || text.includes('month')) return 'Monthly'
   if (text.includes('annual') || text.includes('annually') || text.includes('12m') || text.includes('12 month') || text.includes('year')) return 'Annual'
-  if (dates.length > 1) {
-    const intervals = dates.slice(1).map((date, index) => (date - dates[index]) / 86400000).filter((days) => days > 0)
-    const average = intervals.length ? intervals.reduce((sum, days) => sum + days, 0) / intervals.length : 0
-    if (average <= 9) return 'Weekly'
-    if (average <= 45) return 'Monthly'
-    if (average <= 110) return 'Quarterly'
-    if (average <= 220) return 'Biannual'
+  if (medianInterval) {
+    if (medianInterval <= 9) return 'Weekly'
+    if (medianInterval <= 17) return '2-Weekly'
+    if (medianInterval <= 45) return 'Monthly'
+    if (medianInterval <= 65) return '8-Weekly'
+    if (medianInterval <= 110) return 'Quarterly'
+    if (medianInterval <= 220) return 'Biannual'
   }
   return 'Annual'
 }
