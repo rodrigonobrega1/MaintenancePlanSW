@@ -65,7 +65,7 @@ const dashboardReportStorageKey = 'fieldmark-dashboard-report'
 const maintenanceScheduleStorageKey = 'fieldmark-maintenance-schedule'
 const teamNotesStorageKey = 'fieldmark-team-notes'
 const executionUploadStorageKey = 'fieldmark-execution-upload'
-const planUploadStorageKey = 'fieldmark-plan-upload'
+const planUploadStorageKey = 'fieldmark-plan-upload-v2'
 
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer)
