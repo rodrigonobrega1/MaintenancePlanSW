@@ -59,7 +59,7 @@ function normalizeRows(buffer) {
       engineer: String(row.Engineer || '').trim(),
       daysOpen: daysOpen(dateAdded, status),
     }
-  }).filter((row) => row.title)
+  }).filter((row) => row.title && !/^COR$/i.test(row.machine.trim()))
 }
 
 function sortRows(rows) {

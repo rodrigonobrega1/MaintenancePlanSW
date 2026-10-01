@@ -1031,6 +1031,7 @@ function normalizeWorkbook(buffer) {
   rows.forEach((row) => {
     const rawDescription = String(row['Maintenance item description'] || '').trim()
     if (!rawDescription) return
+    if (/^COR\s*-\s*/i.test(rawDescription)) return
     const separator = rawDescription.indexOf(' - ')
     const machine = separator > 0 ? rawDescription.slice(0, separator).trim() : 'General / site-wide'
     const activity = separator > 0 ? rawDescription.slice(separator + 3).trim() : rawDescription
@@ -1074,6 +1075,7 @@ function normalizeTimelineWorkbook(buffer) {
   rows.forEach((row) => {
     const rawDescription = String(row['Maintenance item description'] || '').trim()
     if (!rawDescription) return
+    if (/^COR\s*-\s*/i.test(rawDescription)) return
     const separator = rawDescription.indexOf(' - ')
     const machine = normalizeMachineName(separator > 0 ? rawDescription.slice(0, separator) : 'General / site-wide')
     const activity = separator > 0 ? rawDescription.slice(separator + 3).trim() : rawDescription
