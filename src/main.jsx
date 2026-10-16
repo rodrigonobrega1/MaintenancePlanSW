@@ -152,17 +152,16 @@ function getTopCriticalTasksPerLine(plans, machine, limit = 5) {
 function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: selectedWeekStart }) {
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-  const displayDayOrder = [5, 6, 0, 1, 2, 3, 4]
+  const days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
   const palette = { orange: [217, 130, 59], red: [189, 103, 92], green: [46, 125, 74], blue: [77, 127, 209], graphite: [37, 40, 45] }
   const severityColors = { Critical: palette.red, Overdue: palette.orange, Normal: palette.green }
   const rowAccents = [palette.orange, palette.blue, palette.green, palette.red, palette.graphite]
   const formatDuration = (value) => value || 'Full Day'
   const parseHours = (value) => { const match = String(value || '').match(/(\d+(\.\d+)?)/); return match ? parseFloat(match[1]) : 8 }
 
-  const weekStart = getMonday(selectedWeekStart ? new Date(selectedWeekStart) : new Date())
+  const weekStart = getOperationalWeekStart(selectedWeekStart || new Date())
   const weekDates = days.map((_, index) => addDays(weekStart, index))
-  const weekLabel = `CW${Math.ceil((((weekStart - new Date(weekStart.getFullYear(), 0, 1)) / 86400000) + 1) / 7)} (${weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${weekDates[6].getFullYear()})`
+  const weekLabel = formatOperationalWeekRange(selectedWeekStart || new Date())
 
   const drawHeader = (title, subtitle) => {
     pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15.5); pdf.text(title, 12, 15)
@@ -218,10 +217,9 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
   pdf.setFillColor(...palette.graphite); pdf.rect(12, gridY, 273, 9, 'F')
   pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6)
   pdf.text('MACHINE / PRODUCTION LINE', 15, gridY + 6)
-  displayDayOrder.forEach((dayIndex, columnIndex) => {
-    const x = gridX + columnIndex * dayWidth
-    const day = days[dayIndex]
-    pdf.text(`${day.slice(0, 3).toUpperCase()} ${weekDates[dayIndex].getDate()}`, x + dayWidth / 2 - 9, gridY + 6)
+  days.forEach((day, index) => {
+    const x = gridX + index * dayWidth
+    pdf.text(`${day.slice(0, 3).toUpperCase()} ${weekDates[index].getDate()}`, x + dayWidth / 2 - 9, gridY + 6)
   })
 
   allocations.forEach((allocation, rowIndex) => {
@@ -234,9 +232,8 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     pdf.text(`${allocation.day} · ${formatDuration(allocation.duration)}`.slice(0, 30), 16, y + rowHeight / 2 + 3.6)
     pdf.setDrawColor(235, 238, 240); pdf.line(12, y + rowHeight, 285, y + rowHeight)
     const dayIndex = days.indexOf(allocation.day)
-    const columnIndex = displayDayOrder.indexOf(dayIndex)
-    if (columnIndex >= 0) {
-      const badgeX = gridX + columnIndex * dayWidth + 2
+    if (dayIndex >= 0) {
+      const badgeX = gridX + dayIndex * dayWidth + 2
       const badgeHeight = Math.max(6, rowHeight - 5)
       pdf.setFillColor(...accent); pdf.roundedRect(badgeX, y + (rowHeight - badgeHeight) / 2, dayWidth - 4, badgeHeight, 1.2, 1.2, 'F')
       pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.2); pdf.text(formatDuration(allocation.duration).slice(0, 15), badgeX + 2, y + rowHeight / 2 + 1)
@@ -2340,6 +2337,18 @@ function formatWeekRange(start) {
   return `${startLabel} – ${endLabel}`
 }
 
+function getOperationalWeekStart(selectedMonday) {
+  return addDays(getMonday(new Date(selectedMonday)), 5)
+}
+
+function formatOperationalWeekRange(selectedMonday) {
+  const start = getOperationalWeekStart(selectedMonday)
+  const end = addDays(start, 6)
+  const startLabel = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const endLabel = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  return `${startLabel} – ${endLabel}`
+}
+
 function getShutdownWindow(dayIndex) {
   return ['202', 'EMBA', 'Gopfert', '205', '115 / 102 / 616 + 201', 'MPG 172 + 170', 'MPG 172 + 170'][dayIndex]
 }
@@ -2547,13 +2556,13 @@ function WeeklyReportModal({ lines, onClose, onGenerate }) {
         </div>
         <div className="weekly-week-picker">
           <label>
-            <span>Report week</span>
+            <span>Planning week (Monday)</span>
             <div className="date-input-wrap">
               <CalendarDays size={15} />
               <input type="date" value={formatDateKey(weekStart)} onChange={(event) => event.target.value && setWeekStart(getMonday(new Date(`${event.target.value}T00:00:00`)))} />
             </div>
           </label>
-          <span className="weekly-week-range">{formatWeekRange(weekStart)}</span>
+          <span className="weekly-week-range">Operational period: {formatOperationalWeekRange(weekStart)}</span>
         </div>
         <div className="weekly-allocation-list">
           {allocations.map((allocation) => (
