@@ -153,6 +153,7 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = 297
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  const displayDayOrder = [5, 6, 0, 1, 2, 3, 4]
   const palette = { orange: [217, 130, 59], red: [189, 103, 92], green: [46, 125, 74], blue: [77, 127, 209], graphite: [37, 40, 45] }
   const severityColors = { Critical: palette.red, Overdue: palette.orange, Normal: palette.green }
   const rowAccents = [palette.orange, palette.blue, palette.green, palette.red, palette.graphite]
@@ -217,9 +218,10 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
   pdf.setFillColor(...palette.graphite); pdf.rect(12, gridY, 273, 9, 'F')
   pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6)
   pdf.text('MACHINE / PRODUCTION LINE', 15, gridY + 6)
-  days.forEach((day, index) => {
-    const x = gridX + index * dayWidth
-    pdf.text(`${day.slice(0, 3).toUpperCase()} ${weekDates[index].getDate()}`, x + dayWidth / 2 - 9, gridY + 6)
+  displayDayOrder.forEach((dayIndex, columnIndex) => {
+    const x = gridX + columnIndex * dayWidth
+    const day = days[dayIndex]
+    pdf.text(`${day.slice(0, 3).toUpperCase()} ${weekDates[dayIndex].getDate()}`, x + dayWidth / 2 - 9, gridY + 6)
   })
 
   allocations.forEach((allocation, rowIndex) => {
@@ -232,8 +234,9 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     pdf.text(`${allocation.day} · ${formatDuration(allocation.duration)}`.slice(0, 30), 16, y + rowHeight / 2 + 3.6)
     pdf.setDrawColor(235, 238, 240); pdf.line(12, y + rowHeight, 285, y + rowHeight)
     const dayIndex = days.indexOf(allocation.day)
-    if (dayIndex >= 0) {
-      const badgeX = gridX + dayIndex * dayWidth + 2
+    const columnIndex = displayDayOrder.indexOf(dayIndex)
+    if (columnIndex >= 0) {
+      const badgeX = gridX + columnIndex * dayWidth + 2
       const badgeHeight = Math.max(6, rowHeight - 5)
       pdf.setFillColor(...accent); pdf.roundedRect(badgeX, y + (rowHeight - badgeHeight) / 2, dayWidth - 4, badgeHeight, 1.2, 1.2, 'F')
       pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.2); pdf.text(formatDuration(allocation.duration).slice(0, 15), badgeX + 2, y + rowHeight / 2 + 1)
