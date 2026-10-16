@@ -235,7 +235,8 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     if (dayIndex >= 0) {
       const badgeX = gridX + dayIndex * dayWidth + 2
       const badgeHeight = Math.max(6, rowHeight - 5)
-      pdf.setFillColor(...accent); pdf.roundedRect(badgeX, y + (rowHeight - badgeHeight) / 2, dayWidth - 4, badgeHeight, 1.2, 1.2, 'F')
+      const badgeColor = dayIndex < 2 ? [83, 94, 104] : accent
+      pdf.setFillColor(...badgeColor); pdf.roundedRect(badgeX, y + (rowHeight - badgeHeight) / 2, dayWidth - 4, badgeHeight, 1.2, 1.2, 'F')
       pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.2); pdf.text(formatDuration(allocation.duration).slice(0, 15), badgeX + 2, y + rowHeight / 2 + 1)
     }
   })
