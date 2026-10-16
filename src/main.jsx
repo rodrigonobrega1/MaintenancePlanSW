@@ -154,6 +154,8 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
   const pageWidth = 297
   const days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
   const palette = { orange: [217, 130, 59], red: [189, 103, 92], green: [46, 125, 74], blue: [77, 127, 209], graphite: [37, 40, 45] }
+  const weekendShade = [241, 244, 246]
+  const weekendHeader = [83, 94, 104]
   const severityColors = { Critical: palette.red, Overdue: palette.orange, Normal: palette.green }
   const rowAccents = [palette.orange, palette.blue, palette.green, palette.red, palette.graphite]
   const formatDuration = (value) => value || 'Full Day'
@@ -211,12 +213,16 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     phaseX += phaseWidth
   })
 
-  const gridY = 78; const gridX = 60; const availableGridHeight = 187 - gridY
+  const gridY = 83; const gridX = 60; const availableGridHeight = 187 - gridY
   const dayWidth = (285 - gridX) / 7
   const rowHeight = Math.min(13, Math.max(8, availableGridHeight / Math.max(1, allocations.length)))
   pdf.setFillColor(...palette.graphite); pdf.rect(12, gridY, 273, 9, 'F')
+  pdf.setFillColor(...weekendHeader); pdf.rect(gridX, gridY, dayWidth * 2, 9, 'F')
   pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6)
   pdf.text('MACHINE / PRODUCTION LINE', 15, gridY + 6)
+  pdf.setTextColor(...weekendHeader); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(5.8)
+  pdf.text('WORK FOR THIS WEEKEND', gridX + dayWidth, gridY - 3, { align: 'center' })
+  pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.6)
   days.forEach((day, index) => {
     const x = gridX + index * dayWidth
     pdf.text(`${day.slice(0, 3).toUpperCase()} ${weekDates[index].getDate()}`, x + dayWidth / 2 - 9, gridY + 6)
@@ -226,6 +232,9 @@ function exportWeeklyMaintenanceReport({ plans, allocations, line, weekStart: se
     const y = gridY + 9 + rowIndex * rowHeight
     const accent = rowAccents[rowIndex % rowAccents.length]
     if (rowIndex % 2 === 1) { pdf.setFillColor(248, 249, 250); pdf.rect(12, y, 273, rowHeight, 'F') }
+    pdf.setFillColor(...weekendShade)
+    pdf.rect(gridX, y, dayWidth, rowHeight, 'F')
+    pdf.rect(gridX + dayWidth, y, dayWidth, rowHeight, 'F')
     pdf.setFillColor(...accent); pdf.rect(12, y, 1.3, rowHeight, 'F')
     pdf.setTextColor(...palette.graphite); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.6); pdf.text(allocation.machine.slice(0, 28), 16, y + rowHeight / 2 - 1)
     pdf.setTextColor(...accent); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.2)
