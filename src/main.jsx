@@ -2338,7 +2338,13 @@ function formatWeekRange(start) {
 }
 
 function getOperationalWeekStart(selectedMonday) {
-  return addDays(getMonday(new Date(selectedMonday)), 5)
+  return addDays(getPlanningMonday(selectedMonday), -2)
+}
+
+function getPlanningMonday(selectedDate) {
+  const date = new Date(selectedDate)
+  const monday = getMonday(date)
+  return date.getDay() === 1 ? monday : addDays(monday, 7)
 }
 
 function formatOperationalWeekRange(selectedMonday) {
@@ -2540,7 +2546,7 @@ function ReportShutdownModal({ line, plansCount, onClose, onGenerate }) {
 function WeeklyReportModal({ lines, onClose, onGenerate }) {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
   const [allocations, setAllocations] = useState(() => lines.map((machine, index) => ({ machine, day: days[index % days.length], duration: 'Full Day' })))
-  const [weekStart, setWeekStart] = useState(() => getMonday(new Date()))
+  const [weekStart, setWeekStart] = useState(() => getPlanningMonday(new Date()))
   const updateAllocation = (machine, field, value) => setAllocations((current) => current.map((allocation) => allocation.machine === machine ? { ...allocation, [field]: value } : allocation))
 
   return (
@@ -2559,7 +2565,7 @@ function WeeklyReportModal({ lines, onClose, onGenerate }) {
             <span>Planning week (Monday)</span>
             <div className="date-input-wrap">
               <CalendarDays size={15} />
-              <input type="date" value={formatDateKey(weekStart)} onChange={(event) => event.target.value && setWeekStart(getMonday(new Date(`${event.target.value}T00:00:00`)))} />
+              <input type="date" value={formatDateKey(weekStart)} onChange={(event) => event.target.value && setWeekStart(getPlanningMonday(new Date(`${event.target.value}T00:00:00`)))} />
             </div>
           </label>
           <span className="weekly-week-range">Operational period: {formatOperationalWeekRange(weekStart)}</span>
